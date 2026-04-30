@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from app.shared.config import get_settings
+from app.shared.database import close_engine, init_engine
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    init_engine(settings.DATABASE_URL)
+    try:
+        yield
+    finally:
+        await close_engine()
+
+
+app = FastAPI(
+    title="Educational Content RAG Service",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+
+@app.get("/health", tags=["system"])
+async def health() -> dict[str, str]:
+    """Liveness probe. The interviewer will use this to verify the service boots."""
+    return {"status": "ok"}
+
+
+# TODO (candidate):
+# Wire your feature routers here, e.g.:
+#   from app.documents.router import router as documents_router
+#   app.include_router(documents_router)
