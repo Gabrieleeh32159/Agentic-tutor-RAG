@@ -4,9 +4,22 @@ Fill this in as you work. We will use it as the starting point for the sync tech
 
 ## Technical decisions
 
-k = 3 porque hay muy pocos documentos, incluso veo en los documentos de ejemplo que hay hasta 3 libros para un curso.
-
 Use openAI por comodidad pero creé una abstracción, tal que la llamada no dependa del provider, si quiero agregar un provider distinto simplemente expando la abstracción.
+
+K: Para esta data pequeña usar 3 me parece suficiente, ya que usar un valor muy alto podría introducir ruido de documentos que no deseo. En caso de mayor data podría usar 5, 10 o más. Considero que no hay un valor "perfecto" y se puede ir iterando hasta lograr un buen resultado.
+
+Estoy poniendo el contexto en el user prompt, ya que es data que puede cambiar entre requests. Incluso algún fragmento podría tener data maliciosa y hacer prompt injection. Este user prompt incluye los documentos relevantes en orden y luego la pregunta del usuario:
+
+```
+"""Context documents:
+[1] Title: Documento 1
+Contenido del documento 1
+
+[2] Title: Documento 2
+Contenido del documento 2
+
+Student question: {question}"""
+```
 
 _The main decisions you made and why. Examples: which LLM provider you used, how you modeled documents, how you designed the RAG prompt, which retrieval `k` you chose, whether you used an index on the vector column._
 
@@ -19,5 +32,6 @@ _Anything you deliberately skipped, simplified, or mocked, and why._
 ## What I would do next
 
 Hacer mejor testing del search (testing con un llm).
+Hacer chunking de los documentos.
 
 _Two or three concrete things you would do if you had another half-day._
