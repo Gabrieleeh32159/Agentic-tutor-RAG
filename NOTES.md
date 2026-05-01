@@ -12,4 +12,6 @@ _Anything you deliberately skipped, simplified, or mocked, and why._
 
 ## What I would do next
 
+Agregaría validación de errores y lógica de retry con exponential backoff.
+
 _Two or three concrete things you would do if you had another half-day._

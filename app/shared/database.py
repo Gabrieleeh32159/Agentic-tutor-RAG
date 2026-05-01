@@ -29,6 +29,12 @@ async def close_engine() -> None:
         _engine = None
 
 
+def get_engine() -> AsyncEngine:
+    if _engine is None:
+        raise RuntimeError("Database engine is not initialized.")
+    return _engine
+
+
 async def get_session() -> AsyncIterator[AsyncSession]:
     """FastAPI dependency yielding an `AsyncSession`. Use via `Depends(get_session)`."""
     if _session_factory is None:
