@@ -45,5 +45,7 @@ async def health() -> dict[str, str]:
 #   app.include_router(documents_router)
 
 from app.documents.router import router as documents_router
+from app.search.router import router as search_router
 
 app.include_router(documents_router)
+app.include_router(search_router)
