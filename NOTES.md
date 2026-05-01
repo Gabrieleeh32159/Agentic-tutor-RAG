@@ -4,6 +4,10 @@ Fill this in as you work. We will use it as the starting point for the sync tech
 
 ## Technical decisions
 
+k = 3 porque hay muy pocos documentos, incluso veo en los documentos de ejemplo que hay hasta 3 libros para un curso.
+
+Use openAI por comodidad pero creé una abstracción, tal que la llamada no dependa del provider, si quiero agregar un provider distinto simplemente expando la abstracción.
+
 _The main decisions you made and why. Examples: which LLM provider you used, how you modeled documents, how you designed the RAG prompt, which retrieval `k` you chose, whether you used an index on the vector column._
 
 ## Trade-offs and things left out
@@ -14,6 +18,6 @@ _Anything you deliberately skipped, simplified, or mocked, and why._
 
 ## What I would do next
 
-Hacer testing inteligente del RAG.
+Hacer mejor testing del search (testing con un llm).
 
 _Two or three concrete things you would do if you had another half-day._

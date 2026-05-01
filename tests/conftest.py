@@ -9,7 +9,9 @@ from httpx import ASGITransport
 from sqlmodel import SQLModel
 
 import app.shared.embeddings as embeddings_module
+import app.shared.llm as llm_module
 from app.shared.embeddings import EmbeddingProvider
+from app.shared.llm import LLMProvider
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
 
@@ -36,6 +38,14 @@ class FakeEmbeddingProvider(EmbeddingProvider):
         return [self._fake_vector(t) for t in texts]
 
 
+class FakeLLMProvider(LLMProvider):
+    """Returns a fixed answer for tests, no real LLM call."""
+
+    async def stream(self, system_prompt: str, user_prompt: str):
+        for word in ["This ", "is ", "a ", "test ", "answer."]:
+            yield word
+
+
 @pytest.fixture(autouse=True)
 def mock_embedding_provider() -> None:
     """Replace the real embedding provider with a fake for all tests."""
@@ -43,6 +53,15 @@ def mock_embedding_provider() -> None:
     embeddings_module._provider = fake
     yield  # type: ignore[misc]
     embeddings_module._provider = None
+
+
+@pytest.fixture(autouse=True)
+def mock_llm_provider() -> None:
+    """Replace the real LLM provider with a fake for all tests."""
+    fake = FakeLLMProvider()
+    llm_module._llm_provider = fake
+    yield  # type: ignore[misc]
+    llm_module._llm_provider = None
 
 
 @pytest.fixture(autouse=True)

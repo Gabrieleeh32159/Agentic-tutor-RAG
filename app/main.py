@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,7 @@ from app.documents.models import Document  # noqa: F401
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    logging.basicConfig(level=settings.LOG_LEVEL.upper())
     init_engine(settings.DATABASE_URL)
 
     async with get_engine().begin() as conn:
@@ -46,6 +48,8 @@ async def health() -> dict[str, str]:
 
 from app.documents.router import router as documents_router
 from app.search.router import router as search_router
+from app.chat.router import router as chat_router
 
 app.include_router(documents_router)
 app.include_router(search_router)
+app.include_router(chat_router)
