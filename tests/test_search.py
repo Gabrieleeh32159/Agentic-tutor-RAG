@@ -39,8 +39,18 @@ async def test_search_returns_results(seeded_client: httpx.AsyncClient) -> None:
 
     data = response.json()
     assert len(data) > 0
-    assert "score" in data[0]
-    assert "title" in data[0]
+    result = data[0]
+    assert "document_id" in result
+    assert "title" in result
+    assert "subject" in result
+    assert "level" in result
+    assert "score" in result
+    assert "chunks" in result
+    assert len(result["chunks"]) > 0
+    chunk = result["chunks"][0]
+    assert "chunk_id" in chunk
+    assert "chunk_text" in chunk
+    assert "score" in chunk
 
 
 @pytest.mark.asyncio

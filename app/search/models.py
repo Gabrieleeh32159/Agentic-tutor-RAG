@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 
 from sqlmodel import SQLModel
 
 
+class SearchChunk(SQLModel):
+    chunk_id: uuid.UUID
+    chunk_text: str
+    score: float
+
+
 class SearchResult(SQLModel):
-    id: uuid.UUID
+    document_id: uuid.UUID
     title: str
     subject: str
     level: str
-    created_at: datetime
     score: float
+    chunks: list[SearchChunk]
