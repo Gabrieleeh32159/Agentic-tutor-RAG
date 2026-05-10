@@ -51,14 +51,16 @@ async def test_chat_stream_contains_sources(
     body = response.text
     lines = [l for l in body.split("\n") if l.startswith("data: ")]
 
-    # First data event should be sources
-    first_data = lines[0].removeprefix("data: ")
-    parsed = json.loads(first_data)
+    # Find the sources event
+    sources_lines = [l for l in lines if "sources" in l]
+    assert len(sources_lines) > 0
+    parsed = json.loads(sources_lines[0].removeprefix("data: "))
     assert "sources" in parsed
     assert isinstance(parsed["sources"], list)
     assert len(parsed["sources"]) > 0
-    assert "id" in parsed["sources"][0]
+    assert "document_id" in parsed["sources"][0]
     assert "title" in parsed["sources"][0]
+    assert "score" in parsed["sources"][0]
 
 
 @pytest.mark.asyncio
@@ -72,11 +74,24 @@ async def test_chat_stream_contains_tokens(
     body = response.text
     lines = [l for l in body.split("\n") if l.startswith("data: ")]
 
-    # Should have token events between sources and [DONE]
+    # Should have token events
     token_lines = [l for l in lines if '"token"' in l]
     assert len(token_lines) > 0
 
     # Last event should be [DONE]
+    assert lines[-1] == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_ends_with_done(
+    seeded_chat_client: httpx.AsyncClient,
+) -> None:
+    response = await seeded_chat_client.post(
+        "/chat",
+        json={"question": "What is a derivative?"},
+    )
+    body = response.text
+    lines = [l for l in body.split("\n") if l.startswith("data: ")]
     assert lines[-1] == "data: [DONE]"
 
 
@@ -115,9 +130,10 @@ async def test_chat_with_subject_filter(
     assert response.status_code == 200
     body = response.text
     lines = [l for l in body.split("\n") if l.startswith("data: ")]
-    first_data = json.loads(lines[0].removeprefix("data: "))
+    sources_line = next(l for l in lines if '"sources"' in l)
+    parsed = json.loads(sources_line.removeprefix("data: "))
     # All sources should be biology
-    for src in first_data["sources"]:
+    for src in parsed["sources"]:
         # We only seeded one biology doc, so it should show up
         assert src["title"] == "Cell Structure"
 

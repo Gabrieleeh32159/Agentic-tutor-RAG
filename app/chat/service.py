@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import logging
+from typing import Any
 
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+from langgraph.graph import END, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.models import ChatSourceDocument
+from app.chat.models import AgentState
 from app.search.service import search_documents
-from app.shared.llm import LLMProvider
+from app.shared.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are an educational AI study assistant. "
@@ -16,59 +23,151 @@ SYSTEM_PROMPT = (
     "Be concise, accurate, and helpful."
 )
 
-CONTEXT_LIMIT = 3
+GRADER_PROMPT = (
+    "You are a relevance grader. Given a student question and retrieved documents, "
+    "determine if the documents contain information relevant to answering the question. "
+    "Respond with exactly 'yes' or 'no'."
+)
+
+CONTEXT_LIMIT = 5
+MAX_RETRIES = 2
+
+REWRITE_PROMPT = (
+    "You are a query rewriter. Given a student question that did not return relevant results, "
+    "rewrite the question to improve retrieval. Keep the same intent but use different keywords "
+    "or phrasing. Return only the rewritten question, nothing else."
+)
+
+NOT_FOUND_MESSAGE = (
+    "I'm sorry, I couldn't find relevant information in our knowledge base "
+    "to answer your question. Please try rephrasing or asking about a different topic."
+)
 
 
-def _build_user_prompt(question: str, context_docs: list[dict[str, str]]) -> str:
-    context_parts = []
-    for i, doc in enumerate(context_docs, 1):
-        context_parts.append(
-            f"[{i}] Title: {doc['title']}\n{doc['content']}"
+def _build_context_block(state: AgentState) -> str:
+    parts: list[str] = []
+    idx = 1
+    for doc in state.get("documents", []):
+        for chunk in doc.chunks:
+            parts.append(f"[{idx}] Title: {doc.title}\n{chunk.chunk_text}")
+            idx += 1
+    return "\n\n".join(parts)
+
+
+def _make_retrieve_node(session: AsyncSession):
+    async def retrieve(state: AgentState) -> dict[str, Any]:
+        results = await search_documents(
+            session=session,
+            query=state["question"],
+            limit=CONTEXT_LIMIT,
+            subject=state.get("subject"),
+            level=state.get("level"),
         )
-    context_block = "\n\n".join(context_parts)
-    return (
-        f"Context documents:\n{context_block}\n\n"
-        f"Student question: {question}"
-    )
+        return {"documents": results}
+
+    return retrieve
 
 
-async def retrieve_context(
+def _make_grade_node(llm: BaseChatModel):
+    async def grade_documents(state: AgentState) -> dict[str, Any]:
+        documents = state.get("documents", [])
+        if not documents:
+            return {"is_relevant": False}
+
+        context = _build_context_block(state)
+        messages = [
+            SystemMessage(content=GRADER_PROMPT),
+            HumanMessage(
+                content=(
+                    f"Question: {state['question']}\n\n"
+                    f"Documents:\n{context}"
+                )
+            ),
+        ]
+        response = await llm.ainvoke(messages)
+        answer = response.content.strip().lower()
+        return {"is_relevant": answer.startswith("yes")}
+
+    return grade_documents
+
+
+def _make_generate_node(llm: BaseChatModel):
+    tagged_llm = llm.with_config(tags=["generator"])
+
+    async def generate(state: AgentState) -> dict[str, Any]:
+        context = _build_context_block(state)
+        messages = [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(
+                content=(
+                    f"Context documents:\n{context}\n\n"
+                    f"Student question: {state['question']}"
+                )
+            ),
+        ]
+        full_response = ""
+        async for chunk in tagged_llm.astream(messages):
+            full_response += chunk.content if hasattr(chunk, "content") else str(chunk)
+        return {"generation": full_response}
+
+    return generate
+
+
+def _make_rewrite_node(llm: BaseChatModel):
+    async def rewrite_query(state: AgentState) -> dict[str, Any]:
+        messages = [
+            SystemMessage(content=REWRITE_PROMPT),
+            HumanMessage(content=state["question"]),
+        ]
+        response = await llm.ainvoke(messages)
+        new_question = response.content.strip()
+        retry_count = state.get("retry_count", 0) + 1
+        return {"question": new_question, "retry_count": retry_count}
+
+    return rewrite_query
+
+
+async def not_found(state: AgentState) -> dict[str, Any]:
+    return {"generation": NOT_FOUND_MESSAGE}
+
+
+def _route_after_grading(state: AgentState) -> str:
+    if state.get("is_relevant"):
+        return "generate"
+    if state.get("retry_count", 0) < MAX_RETRIES:
+        return "rewrite_query"
+    return "not_found"
+
+
+def build_graph(
     session: AsyncSession,
-    question: str,
-    subject: str | None = None,
-    level: str | None = None,
-) -> tuple[list[ChatSourceDocument], list[dict[str, str]]]:
-    results = await search_documents(
-        session=session,
-        query=question,
-        limit=CONTEXT_LIMIT,
-        subject=subject,
-        level=level,
+    llm: BaseChatModel | None = None,
+) -> StateGraph:
+    if llm is None:
+        settings = get_settings()
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            api_key=settings.OPENAI_API_KEY,
+            streaming=True,
+        )
+
+    workflow = StateGraph(AgentState)
+
+    workflow.add_node("retrieve", _make_retrieve_node(session))
+    workflow.add_node("grade_documents", _make_grade_node(llm))
+    workflow.add_node("rewrite_query", _make_rewrite_node(llm))
+    workflow.add_node("generate", _make_generate_node(llm))
+    workflow.add_node("not_found", not_found)
+
+    workflow.set_entry_point("retrieve")
+    workflow.add_edge("retrieve", "grade_documents")
+    workflow.add_conditional_edges(
+        "grade_documents",
+        _route_after_grading,
+        {"generate": "generate", "rewrite_query": "rewrite_query", "not_found": "not_found"},
     )
+    workflow.add_edge("rewrite_query", "retrieve")
+    workflow.add_edge("generate", END)
+    workflow.add_edge("not_found", END)
 
-    sources = [
-        ChatSourceDocument(id=r.id, title=r.title, score=r.score)
-        for r in results
-    ]
-
-    context_docs: list[dict[str, str]] = []
-    for r in results:
-        from app.documents.models import Document
-        from sqlalchemy import select
-
-        stmt = select(Document).where(Document.id == r.id)
-        row = await session.execute(stmt)
-        doc = row.scalar_one()
-        context_docs.append({"title": doc.title, "content": doc.content})
-
-    return sources, context_docs
-
-
-async def stream_chat_response(
-    llm: LLMProvider,
-    question: str,
-    context_docs: list[dict[str, str]],
-) -> AsyncIterator[str]:
-    user_prompt = _build_user_prompt(question, context_docs)
-    async for token in llm.stream(SYSTEM_PROMPT, user_prompt):
-        yield token
+    return workflow.compile()

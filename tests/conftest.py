@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
 from httpx import ASGITransport
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from sqlmodel import SQLModel
 
 import app.shared.embeddings as embeddings_module
-import app.shared.llm as llm_module
 from app.shared.embeddings import EmbeddingProvider
-from app.shared.llm import LLMProvider
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
 
@@ -38,12 +42,39 @@ class FakeEmbeddingProvider(EmbeddingProvider):
         return [self._fake_vector(t) for t in texts]
 
 
-class FakeLLMProvider(LLMProvider):
-    """Returns a fixed answer for tests, no real LLM call."""
+class FakeChatModel(BaseChatModel):
+    """Deterministic fake chat model for tests."""
 
-    async def stream(self, system_prompt: str, user_prompt: str):
-        for word in ["This ", "is ", "a ", "test ", "answer."]:
-            yield word
+    @property
+    def _llm_type(self) -> str:
+        return "fake-chat-model"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        if any("relevance grader" in m.content.lower() for m in messages):
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="yes"))])
+        return ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content="This is a test answer."))]
+        )
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        result = self._generate(messages, stop, run_manager, **kwargs)
+        text = result.generations[0].message.content
+        words = text.split(" ")
+        for i, word in enumerate(words):
+            token = word if i == len(words) - 1 else word + " "
+            yield ChatGenerationChunk(message=AIMessageChunk(content=token))
 
 
 @pytest.fixture(autouse=True)
@@ -56,12 +87,17 @@ def mock_embedding_provider() -> None:
 
 
 @pytest.fixture(autouse=True)
-def mock_llm_provider() -> None:
-    """Replace the real LLM provider with a fake for all tests."""
-    fake = FakeLLMProvider()
-    llm_module._llm_provider = fake
-    yield  # type: ignore[misc]
-    llm_module._llm_provider = None
+def mock_chat_model():
+    """Patch build_graph to use FakeChatModel instead of real OpenAI."""
+    from app.chat import service as chat_service
+
+    _original_build = chat_service.build_graph
+
+    def _patched_build(session, llm=None):
+        return _original_build(session, llm=FakeChatModel())
+
+    with patch.object(chat_service, "build_graph", _patched_build):
+        yield
 
 
 @pytest.fixture(autouse=True)

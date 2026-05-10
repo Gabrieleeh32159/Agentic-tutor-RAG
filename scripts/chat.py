@@ -65,11 +65,34 @@ def main() -> None:
                 for i, src in enumerate(sources, 1):
                     score_pct = src["score"] * 100
                     print(f"  {i}. {src['title']}")
-                    print(f"     ID:    {src['id']}")
+                    print(f"     ID:    {src['document_id']}")
                     print(f"     Score: {score_pct:.1f}%")
+                    chunks = src.get("chunks", [])
+                    for j, chunk in enumerate(chunks, 1):
+                        preview = chunk["chunk_text"][:120].replace("\n", " ")
+                        print(f"     Chunk {j} (score {chunk['score']:.4f}): {preview}...")
                 print(f"  {'─' * 50}\n")
-                print("  💬 Answer:\n")
                 sources_printed = True
+
+            elif "step" in parsed:
+                step = parsed["step"]
+                detail = parsed.get("detail", "")
+                if step == "retrieve":
+                    print(f"  🔍 [{step}] {detail}")
+                elif step == "grade_documents":
+                    is_relevant = parsed.get("is_relevant", False)
+                    icon = "✅" if is_relevant else "❌"
+                    print(f"  {icon} [{step}] {detail}")
+                elif step == "generate":
+                    print(f"  🤖 [{step}] {detail}\n")
+                    print("  💬 Answer:\n")
+                elif step == "rewrite_query":
+                    retry = parsed.get("retry", 0)
+                    new_q = parsed.get("new_question", "")
+                    print(f"  🔄 [{step}] Attempt {retry}: \"{new_q}\"")
+                    sources_printed = False
+                elif step == "not_found":
+                    print(f"  ⚠️  [{step}] {detail}\n")
 
             elif "token" in parsed:
                 sys.stdout.write(parsed["token"])

@@ -17,6 +17,8 @@ dependencies = [
     "httpx>=0.28.0",
     "greenlet>=3.5.0",
     "langchain-text-splitters>=0.3.0",
+    "langgraph>=0.4.0",
+    "langchain-openai>=0.3.0",
 ]
 
 [dependency-groups]

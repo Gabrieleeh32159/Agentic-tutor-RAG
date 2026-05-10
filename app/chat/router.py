@@ -8,9 +8,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.models import ChatRequest
-from app.chat.service import retrieve_context, stream_chat_response
+from app.chat.service import build_graph
 from app.shared.database import get_session
-from app.shared.llm import LLMUnavailableError, get_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -22,32 +21,84 @@ async def chat(
     body: ChatRequest,
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
-    sources, context_docs = await retrieve_context(
-        session=session,
-        question=body.question,
-        subject=body.subject,
-        level=body.level,
-    )
+    graph = build_graph(session)
 
-    llm = get_llm_provider()
+    initial_state = {
+        "question": body.question,
+        "subject": body.subject,
+        "level": body.level,
+    }
 
     async def event_stream():
-        # First, emit the source document IDs as a JSON event
-        sources_payload = json.dumps(
-            {"sources": [{"id": str(s.id), "title": s.title, "score": s.score} for s in sources]}
-        )
-        yield f"data: {sources_payload}\n\n"
-
-        # Then stream the LLM answer token by token
         try:
-            async for token in stream_chat_response(llm, body.question, context_docs):
-                yield f"data: {json.dumps({'token': token})}\n\n"
-            
+            sources_emitted = False
+            async for event in graph.astream_events(initial_state, version="v2"):
+                kind = event["event"]
+
+                # Emit sources after retrieval completes
+                if (
+                    kind == "on_chain_end"
+                    and event.get("name") == "retrieve"
+                    and not sources_emitted
+                ):
+                    documents = event["data"]["output"].get("documents", [])
+                    sources = [
+                        {
+                            "document_id": str(doc.document_id),
+                            "title": doc.title,
+                            "score": doc.score,
+                            "chunks": [
+                                {
+                                    "chunk_id": str(c.chunk_id),
+                                    "chunk_text": c.chunk_text,
+                                    "score": c.score,
+                                }
+                                for c in doc.chunks
+                            ],
+                        }
+                        for doc in documents
+                    ]
+                    yield f"data: {json.dumps({'step': 'retrieve', 'detail': f'Found {len(documents)} relevant documents'})}\n\n"
+                    yield f"data: {json.dumps({'sources': sources})}\n\n"
+                    sources_emitted = True
+
+                # Emit grading decision
+                if kind == "on_chain_end" and event.get("name") == "grade_documents":
+                    output = event["data"]["output"]
+                    is_relevant = output.get("is_relevant", False)
+                    yield f"data: {json.dumps({'step': 'grade_documents', 'is_relevant': is_relevant, 'detail': 'Documents are relevant' if is_relevant else 'Documents are not relevant'})}\n\n"
+
+                # Emit query rewrite
+                if kind == "on_chain_end" and event.get("name") == "rewrite_query":
+                    output = event["data"]["output"]
+                    new_question = output.get("question", "")
+                    retry = output.get("retry_count", 0)
+                    yield f"data: {json.dumps({'step': 'rewrite_query', 'retry': retry, 'new_question': new_question, 'detail': f'Rewriting query (attempt {retry}): {new_question}'})}\n\n"
+                    sources_emitted = False
+
+                # Emit generate step start
+                if kind == "on_chain_start" and event.get("name") == "generate":
+                    yield f"data: {json.dumps({'step': 'generate', 'detail': 'Generating answer from context...'})}\n\n"
+
+                # Stream tokens from the generate node's LLM call
+                if kind == "on_chat_model_stream":
+                    tags = event.get("tags", [])
+                    if "generator" in tags:
+                        chunk = event["data"]["chunk"]
+                        token = chunk.content if hasattr(chunk, "content") else str(chunk)
+                        if token:
+                            yield f"data: {json.dumps({'token': token})}\n\n"
+
+                # Capture not_found generation
+                if kind == "on_chain_end" and event.get("name") == "not_found":
+                    yield f"data: {json.dumps({'step': 'not_found', 'detail': 'No relevant information found'})}\n\n"
+                    message = event["data"]["output"].get("generation", "")
+                    if message:
+                        yield f"data: {json.dumps({'token': message})}\n\n"
+
             yield "data: [DONE]\n\n"
-        except LLMUnavailableError:
-            yield f"data: {json.dumps({'error': 'All LLM providers are unavailable'})}\n\n"
         except Exception as exc:
-            logger.exception("LLM streaming failed")
+            logger.exception("Chat streaming failed")
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
 
     return StreamingResponse(
