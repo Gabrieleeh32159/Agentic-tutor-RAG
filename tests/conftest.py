@@ -15,7 +15,7 @@ from app.shared.llm import LLMProvider
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
 
-from app.documents.models import Document  # noqa: F401
+from app.documents.models import Document, DocumentChunk  # noqa: F401
 
 
 EMBEDDING_DIM = 1536
@@ -70,6 +70,7 @@ async def _init_db() -> AsyncIterator[None]:
     settings = get_settings()
     init_engine(settings.DATABASE_URL)
     async with get_engine().begin() as conn:
+        await conn.run_sync(SQLModel.metadata.drop_all)
         await conn.run_sync(SQLModel.metadata.create_all)
     yield
     await close_engine()

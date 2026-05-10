@@ -24,7 +24,10 @@ def main() -> None:
             response = client.post(API_URL, json=batch)
             response.raise_for_status()
             docs = response.json()
-            print(f"  Batch {i // BATCH_SIZE + 1}: ingested {len(docs)} documents")
+            total_chunks = sum(d.get("chunk_count", 0) for d in docs)
+            print(
+                f"  Batch {i // BATCH_SIZE + 1}: ingested {len(docs)} documents ({total_chunks} chunks)"
+            )
 
     print(f"Done. Total documents ingested: {len(items)}")
 

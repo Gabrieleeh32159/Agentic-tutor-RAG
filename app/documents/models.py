@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, DateTime, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text
 from sqlmodel import Field, SQLModel
 
 
@@ -19,13 +19,26 @@ class Document(SQLModel, table=True):
     level: Literal["introductory", "intermediate", "advanced"] = Field(
         sa_column=Column(String(20), nullable=False),
     )
-    embedding: list[float] | None = Field(
-        default=None,
-        sa_column=Column(Vector(1536)),
-    )
+    chunk_count: int = Field(default=0)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class DocumentChunk(SQLModel, table=True):
+    __tablename__ = "document_chunks"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    document_id: uuid.UUID = Field(
+        sa_column=Column(
+            ForeignKey("documents.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    chunk_text: str = Field(sa_column=Column(Text, nullable=False))
+    embedding: list[float] = Field(
+        sa_column=Column(Vector(1536), nullable=False),
     )
 
 
@@ -42,3 +55,4 @@ class DocumentResponse(SQLModel):
     subject: str
     level: str
     created_at: datetime
+    chunk_count: int

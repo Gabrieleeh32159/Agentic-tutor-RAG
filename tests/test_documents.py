@@ -23,6 +23,7 @@ async def test_create_document(client: httpx.AsyncClient) -> None:
     assert data["level"] == SAMPLE_DOC["level"]
     assert "id" in data
     assert "created_at" in data
+    assert data["chunk_count"] >= 1
 
 
 @pytest.mark.asyncio
@@ -69,6 +70,8 @@ async def test_bulk_create_documents(client: httpx.AsyncClient) -> None:
     assert len(data) == 2
     assert data[0]["title"] == "Doc 1"
     assert data[1]["title"] == "Doc 2"
+    assert data[0]["chunk_count"] >= 1
+    assert data[1]["chunk_count"] >= 1
 
 
 @pytest.mark.asyncio
