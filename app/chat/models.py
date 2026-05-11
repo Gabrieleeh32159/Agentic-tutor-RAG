@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import uuid
+from enum import StrEnum
 from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
 from app.search.models import SearchResult
+
+
+class NodeName(StrEnum):
+    RETRIEVE = "retrieve"
+    GRADE_DOCUMENTS = "grade_documents"
+    REWRITE_QUERY = "rewrite_query"
+    GENERATE = "generate"
+    NOT_FOUND = "not_found"
 
 
 class ChatRequest(BaseModel):

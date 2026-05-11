@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from httpx import ASGITransport
 
-from app.chat.models import ChatRequest
+from app.chat.models import ChatRequest, NodeName
 from app.chat.service import build_graph
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ async def chat(
                     # Emit sources after retrieval completes
                     if (
                         kind == "on_chain_end"
-                        and event.get("name") == "retrieve"
+                        and event.get("name") == NodeName.RETRIEVE
                         and not sources_emitted
                     ):
                         documents = event["data"]["output"].get("documents", [])
@@ -60,27 +60,27 @@ async def chat(
                             }
                             for doc in documents
                         ]
-                        yield f"data: {json.dumps({'step': 'retrieve', 'detail': f'Found {len(documents)} relevant documents'})}\n\n"
+                        yield f"data: {json.dumps({'step': NodeName.RETRIEVE, 'detail': f'Found {len(documents)} relevant documents'})}\n\n"
                         yield f"data: {json.dumps({'sources': sources})}\n\n"
                         sources_emitted = True
 
                     # Emit grading decision
-                    if kind == "on_chain_end" and event.get("name") == "grade_documents":
+                    if kind == "on_chain_end" and event.get("name") == NodeName.GRADE_DOCUMENTS:
                         output = event["data"]["output"]
                         is_relevant = output.get("is_relevant", False)
-                        yield f"data: {json.dumps({'step': 'grade_documents', 'is_relevant': is_relevant, 'detail': 'Documents are relevant' if is_relevant else 'Documents are not relevant'})}\n\n"
+                        yield f"data: {json.dumps({'step': NodeName.GRADE_DOCUMENTS, 'is_relevant': is_relevant, 'detail': 'Documents are relevant' if is_relevant else 'Documents are not relevant'})}\n\n"
 
                     # Emit query rewrite
-                    if kind == "on_chain_end" and event.get("name") == "rewrite_query":
+                    if kind == "on_chain_end" and event.get("name") == NodeName.REWRITE_QUERY:
                         output = event["data"]["output"]
                         new_question = output.get("question", "")
                         retry = output.get("retry_count", 0)
-                        yield f"data: {json.dumps({'step': 'rewrite_query', 'retry': retry, 'new_question': new_question, 'detail': f'Rewriting query (attempt {retry}): {new_question}'})}\n\n"
+                        yield f"data: {json.dumps({'step': NodeName.REWRITE_QUERY, 'retry': retry, 'new_question': new_question, 'detail': f'Rewriting query (attempt {retry}): {new_question}'})}\n\n"
                         sources_emitted = False
 
                     # Emit generate step start
-                    if kind == "on_chain_start" and event.get("name") == "generate":
-                        yield f"data: {json.dumps({'step': 'generate', 'detail': 'Generating answer from context...'})}\n\n"
+                    if kind == "on_chain_start" and event.get("name") == NodeName.GENERATE:
+                        yield f"data: {json.dumps({'step': NodeName.GENERATE, 'detail': 'Generating answer from context...'})}\n\n"
 
                     # Stream tokens from the generate node's LLM call
                     if kind == "on_chat_model_stream":
@@ -92,8 +92,8 @@ async def chat(
                                 yield f"data: {json.dumps({'token': token})}\n\n"
 
                     # Capture not_found generation
-                    if kind == "on_chain_end" and event.get("name") == "not_found":
-                        yield f"data: {json.dumps({'step': 'not_found', 'detail': 'No relevant information found'})}\n\n"
+                    if kind == "on_chain_end" and event.get("name") == NodeName.NOT_FOUND:
+                        yield f"data: {json.dumps({'step': NodeName.NOT_FOUND, 'detail': 'No relevant information found'})}\n\n"
                         message = event["data"]["output"].get("generation", "")
                         if message:
                             yield f"data: {json.dumps({'token': message})}\n\n"

@@ -8,7 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
-from app.chat.models import AgentState
+from app.chat.models import AgentState, NodeName
 from app.search.models import SearchChunk, SearchResult
 from app.shared.llm import get_chat_model
 
@@ -138,10 +138,10 @@ async def not_found(state: AgentState) -> dict[str, Any]:
 
 def _route_after_grading(state: AgentState) -> str:
     if state.get("is_relevant"):
-        return "generate"
+        return NodeName.GENERATE
     if state.get("retry_count", 0) < MAX_RETRIES:
-        return "rewrite_query"
-    return "not_found"
+        return NodeName.REWRITE_QUERY
+    return NodeName.NOT_FOUND
 
 
 def build_graph(
@@ -153,21 +153,25 @@ def build_graph(
 
     workflow = StateGraph(AgentState)
 
-    workflow.add_node("retrieve", _make_retrieve_node(http_client))
-    workflow.add_node("grade_documents", _make_grade_node(llm))
-    workflow.add_node("rewrite_query", _make_rewrite_node(llm))
-    workflow.add_node("generate", _make_generate_node(llm))
-    workflow.add_node("not_found", not_found)
+    workflow.add_node(NodeName.RETRIEVE, _make_retrieve_node(http_client))
+    workflow.add_node(NodeName.GRADE_DOCUMENTS, _make_grade_node(llm))
+    workflow.add_node(NodeName.REWRITE_QUERY, _make_rewrite_node(llm))
+    workflow.add_node(NodeName.GENERATE, _make_generate_node(llm))
+    workflow.add_node(NodeName.NOT_FOUND, not_found)
 
-    workflow.set_entry_point("retrieve")
-    workflow.add_edge("retrieve", "grade_documents")
+    workflow.set_entry_point(NodeName.RETRIEVE)
+    workflow.add_edge(NodeName.RETRIEVE, NodeName.GRADE_DOCUMENTS)
     workflow.add_conditional_edges(
-        "grade_documents",
+        NodeName.GRADE_DOCUMENTS,
         _route_after_grading,
-        {"generate": "generate", "rewrite_query": "rewrite_query", "not_found": "not_found"},
+        {
+            NodeName.GENERATE: NodeName.GENERATE,
+            NodeName.REWRITE_QUERY: NodeName.REWRITE_QUERY,
+            NodeName.NOT_FOUND: NodeName.NOT_FOUND,
+        },
     )
-    workflow.add_edge("rewrite_query", "retrieve")
-    workflow.add_edge("generate", END)
-    workflow.add_edge("not_found", END)
+    workflow.add_edge(NodeName.REWRITE_QUERY, NodeName.RETRIEVE)
+    workflow.add_edge(NodeName.GENERATE, END)
+    workflow.add_edge(NodeName.NOT_FOUND, END)
 
     return workflow.compile()
