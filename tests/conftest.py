@@ -93,8 +93,8 @@ def mock_chat_model():
 
     _original_build = chat_service.build_graph
 
-    def _patched_build(session, llm=None):
-        return _original_build(session, llm=FakeChatModel())
+    def _patched_build(http_client, llm=None):
+        return _original_build(http_client, llm=FakeChatModel())
 
     with patch.object(chat_service, "build_graph", _patched_build):
         yield

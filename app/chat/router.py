@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, Depends
+import httpx
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from httpx import ASGITransport
 
 from app.chat.models import ChatRequest
 from app.chat.service import build_graph
-from app.shared.database import get_session
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +19,8 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @router.post("")
 async def chat(
     body: ChatRequest,
-    session: AsyncSession = Depends(get_session),
+    request: Request,
 ) -> StreamingResponse:
-    graph = build_graph(session)
-
     initial_state = {
         "question": body.question,
         "subject": body.subject,
@@ -30,76 +28,80 @@ async def chat(
     }
 
     async def event_stream():
-        try:
-            sources_emitted = False
-            async for event in graph.astream_events(initial_state, version="v2"):
-                kind = event["event"]
+        transport = ASGITransport(app=request.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://internal") as http_client:
+            graph = build_graph(http_client)
 
-                # Emit sources after retrieval completes
-                if (
-                    kind == "on_chain_end"
-                    and event.get("name") == "retrieve"
-                    and not sources_emitted
-                ):
-                    documents = event["data"]["output"].get("documents", [])
-                    sources = [
-                        {
-                            "document_id": str(doc.document_id),
-                            "title": doc.title,
-                            "score": doc.score,
-                            "chunks": [
-                                {
-                                    "chunk_id": str(c.chunk_id),
-                                    "chunk_text": c.chunk_text,
-                                    "score": c.score,
-                                }
-                                for c in doc.chunks
-                            ],
-                        }
-                        for doc in documents
-                    ]
-                    yield f"data: {json.dumps({'step': 'retrieve', 'detail': f'Found {len(documents)} relevant documents'})}\n\n"
-                    yield f"data: {json.dumps({'sources': sources})}\n\n"
-                    sources_emitted = True
+            try:
+                sources_emitted = False
+                async for event in graph.astream_events(initial_state, version="v2"):
+                    kind = event["event"]
 
-                # Emit grading decision
-                if kind == "on_chain_end" and event.get("name") == "grade_documents":
-                    output = event["data"]["output"]
-                    is_relevant = output.get("is_relevant", False)
-                    yield f"data: {json.dumps({'step': 'grade_documents', 'is_relevant': is_relevant, 'detail': 'Documents are relevant' if is_relevant else 'Documents are not relevant'})}\n\n"
+                    # Emit sources after retrieval completes
+                    if (
+                        kind == "on_chain_end"
+                        and event.get("name") == "retrieve"
+                        and not sources_emitted
+                    ):
+                        documents = event["data"]["output"].get("documents", [])
+                        sources = [
+                            {
+                                "document_id": str(doc.document_id),
+                                "title": doc.title,
+                                "score": doc.score,
+                                "chunks": [
+                                    {
+                                        "chunk_id": str(c.chunk_id),
+                                        "chunk_text": c.chunk_text,
+                                        "score": c.score,
+                                    }
+                                    for c in doc.chunks
+                                ],
+                            }
+                            for doc in documents
+                        ]
+                        yield f"data: {json.dumps({'step': 'retrieve', 'detail': f'Found {len(documents)} relevant documents'})}\n\n"
+                        yield f"data: {json.dumps({'sources': sources})}\n\n"
+                        sources_emitted = True
 
-                # Emit query rewrite
-                if kind == "on_chain_end" and event.get("name") == "rewrite_query":
-                    output = event["data"]["output"]
-                    new_question = output.get("question", "")
-                    retry = output.get("retry_count", 0)
-                    yield f"data: {json.dumps({'step': 'rewrite_query', 'retry': retry, 'new_question': new_question, 'detail': f'Rewriting query (attempt {retry}): {new_question}'})}\n\n"
-                    sources_emitted = False
+                    # Emit grading decision
+                    if kind == "on_chain_end" and event.get("name") == "grade_documents":
+                        output = event["data"]["output"]
+                        is_relevant = output.get("is_relevant", False)
+                        yield f"data: {json.dumps({'step': 'grade_documents', 'is_relevant': is_relevant, 'detail': 'Documents are relevant' if is_relevant else 'Documents are not relevant'})}\n\n"
 
-                # Emit generate step start
-                if kind == "on_chain_start" and event.get("name") == "generate":
-                    yield f"data: {json.dumps({'step': 'generate', 'detail': 'Generating answer from context...'})}\n\n"
+                    # Emit query rewrite
+                    if kind == "on_chain_end" and event.get("name") == "rewrite_query":
+                        output = event["data"]["output"]
+                        new_question = output.get("question", "")
+                        retry = output.get("retry_count", 0)
+                        yield f"data: {json.dumps({'step': 'rewrite_query', 'retry': retry, 'new_question': new_question, 'detail': f'Rewriting query (attempt {retry}): {new_question}'})}\n\n"
+                        sources_emitted = False
 
-                # Stream tokens from the generate node's LLM call
-                if kind == "on_chat_model_stream":
-                    tags = event.get("tags", [])
-                    if "generator" in tags:
-                        chunk = event["data"]["chunk"]
-                        token = chunk.content if hasattr(chunk, "content") else str(chunk)
-                        if token:
-                            yield f"data: {json.dumps({'token': token})}\n\n"
+                    # Emit generate step start
+                    if kind == "on_chain_start" and event.get("name") == "generate":
+                        yield f"data: {json.dumps({'step': 'generate', 'detail': 'Generating answer from context...'})}\n\n"
 
-                # Capture not_found generation
-                if kind == "on_chain_end" and event.get("name") == "not_found":
-                    yield f"data: {json.dumps({'step': 'not_found', 'detail': 'No relevant information found'})}\n\n"
-                    message = event["data"]["output"].get("generation", "")
-                    if message:
-                        yield f"data: {json.dumps({'token': message})}\n\n"
+                    # Stream tokens from the generate node's LLM call
+                    if kind == "on_chat_model_stream":
+                        tags = event.get("tags", [])
+                        if "generator" in tags:
+                            chunk = event["data"]["chunk"]
+                            token = chunk.content if hasattr(chunk, "content") else str(chunk)
+                            if token:
+                                yield f"data: {json.dumps({'token': token})}\n\n"
 
-            yield "data: [DONE]\n\n"
-        except Exception as exc:
-            logger.exception("Chat streaming failed")
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+                    # Capture not_found generation
+                    if kind == "on_chain_end" and event.get("name") == "not_found":
+                        yield f"data: {json.dumps({'step': 'not_found', 'detail': 'No relevant information found'})}\n\n"
+                        message = event["data"]["output"].get("generation", "")
+                        if message:
+                            yield f"data: {json.dumps({'token': message})}\n\n"
+
+                yield "data: [DONE]\n\n"
+            except Exception as exc:
+                logger.exception("Chat streaming failed")
+                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
 
     return StreamingResponse(
         event_stream(),

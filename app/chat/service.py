@@ -3,14 +3,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.models import AgentState
-from app.search.service import search_documents
+from app.search.models import SearchChunk, SearchResult
 from app.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -54,15 +54,21 @@ def _build_context_block(state: AgentState) -> str:
     return "\n\n".join(parts)
 
 
-def _make_retrieve_node(session: AsyncSession):
+def _make_retrieve_node(http_client: httpx.AsyncClient):
     async def retrieve(state: AgentState) -> dict[str, Any]:
-        results = await search_documents(
-            session=session,
-            query=state["question"],
-            limit=CONTEXT_LIMIT,
-            subject=state.get("subject"),
-            level=state.get("level"),
-        )
+        params: dict[str, str | int] = {
+            "q": state["question"],
+            "limit": CONTEXT_LIMIT,
+        }
+        if state.get("subject"):
+            params["subject"] = state["subject"]
+        if state.get("level"):
+            params["level"] = state["level"]
+
+        response = await http_client.get("/search", params=params)
+        response.raise_for_status()
+
+        results = [SearchResult.model_validate(item) for item in response.json()]
         return {"documents": results}
 
     return retrieve
@@ -140,7 +146,7 @@ def _route_after_grading(state: AgentState) -> str:
 
 
 def build_graph(
-    session: AsyncSession,
+    http_client: httpx.AsyncClient,
     llm: BaseChatModel | None = None,
 ) -> StateGraph:
     if llm is None:
@@ -153,7 +159,7 @@ def build_graph(
 
     workflow = StateGraph(AgentState)
 
-    workflow.add_node("retrieve", _make_retrieve_node(session))
+    workflow.add_node("retrieve", _make_retrieve_node(http_client))
     workflow.add_node("grade_documents", _make_grade_node(llm))
     workflow.add_node("rewrite_query", _make_rewrite_node(llm))
     workflow.add_node("generate", _make_generate_node(llm))
