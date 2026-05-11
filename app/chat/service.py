@@ -6,12 +6,11 @@ from typing import Any
 import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
 from app.chat.models import AgentState
 from app.search.models import SearchChunk, SearchResult
-from app.shared.config import get_settings
+from app.shared.llm import get_chat_model
 
 logger = logging.getLogger(__name__)
 
@@ -150,12 +149,7 @@ def build_graph(
     llm: BaseChatModel | None = None,
 ) -> StateGraph:
     if llm is None:
-        settings = get_settings()
-        llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            api_key=settings.OPENAI_API_KEY,
-            streaming=True,
-        )
+        llm = get_chat_model()
 
     workflow = StateGraph(AgentState)
 
