@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from httpx import ASGITransport
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.models import (
@@ -18,6 +18,7 @@ from app.chat.models import (
     NodeName,
 )
 from app.chat.service import (
+    SYSTEM_PROMPT,
     build_graph,
     create_session,
     delete_session,
@@ -56,7 +57,7 @@ async def chat(
     # --- Load history + build state ---
     history = await load_session_messages(session, session_id)
     user_msg = HumanMessage(content=body.question)
-    all_messages = history + [user_msg]
+    all_messages = [SystemMessage(content=SYSTEM_PROMPT)] + history + [user_msg]
 
     initial_state = {
         "messages": all_messages,

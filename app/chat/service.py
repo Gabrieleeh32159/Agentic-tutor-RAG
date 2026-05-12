@@ -39,30 +39,47 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = (
-    "You are an educational AI study assistant. "
-    "When a student asks anything, use the search_documents tool to find "
-    "relevant information from the knowledge base, "
-    "then answer citing sources by their title. Never answer from your own knowledge."
-    "Be concise, accurate, and helpful. Always answer in Markdown format."
+    "You are a friendly and helpful educational AI study assistant for uDocz. "
+    "You love helping students learn and always respond in a warm, encouraging tone.\n\n"
+    "## Conversation\n"
+    "- For greetings, casual chat, follow-up questions, or clarifications, "
+    "respond naturally and warmly WITHOUT using the search tool.\n"
+    "- When continuing a conversation, consider the previous context.\n\n"
+    "## Academic questions\n"
+    "- Use the search_documents tool ONLY for academic, factual, or knowledge-based questions.\n"
+    "- Base your answer on the retrieved documents. Cite sources inline using [Title] format, "
+    "e.g. 'According to [Calculus I], derivatives measure rates of change.'\n"
+    "- If no relevant documents are found, say so honestly.\n\n"
+    "## Format\n"
+    "- ALWAYS respond in well-structured Markdown.\n"
+    "- Use headers (##, ###), bold, bullet points, and numbered lists to organize content.\n"
+    "- For math equations, ALWAYS use LaTeX wrapped in dollar signs: "
+    "inline math with $...$ and block math with $$...$$.\n"
+    "  Example: 'The derivative is $f'(x) = 2x$' or a block:\n"
+    "  $$\\frac{dy}{dx} = f'(g(x)) \\cdot g'(x)$$\n"
+    "- Never write raw LaTeX without dollar sign delimiters."
 )
 
-GRADER_PROMPT = ("Be concise, accurate, and helpful."
+GRADER_PROMPT = (
     "You are a relevance grader. Given a student question and retrieved documents, "
-    "determine if the documents contain information that could help answer the question. "
-    "Be lenient: if the documents are even partially related to the topic or could "
-    "provide useful context, respond 'yes'. Only respond 'no' if the documents are "
-    "completely unrelated to the question. "
+    "determine if the documents contain information relevant to the question. "
+    "Be lenient: if the documents are even partially related or provide useful context, "
+    "respond 'yes'. Only respond 'no' if the documents are completely unrelated. "
     "Respond with exactly 'yes' or 'no'."
 )
 
 REWRITE_PROMPT = (
-    "You are a query rewriter. Given a student question that did not return relevant "
-    "results, rewrite the question to improve retrieval. Keep the same intent but use "
-    "different keywords or phrasing. Return only the rewritten question, nothing else."
+    "You are a query rewriter for an educational search engine. "
+    "The original query did not return relevant results. "
+    "Rewrite it using synonyms, broader/narrower terms, or academic phrasing "
+    "to improve retrieval. Keep the same intent. "
+    "Return only the rewritten question, nothing else."
 )
 
 CONTEXT_LIMIT = 5
 MAX_RETRIES = 2
+HIGH_RELEVANCE_THRESHOLD = 0.75
+LOW_RELEVANCE_THRESHOLD = 0.25
 NOT_FOUND_MESSAGE = (
     "No relevant documents were found in the knowledge base for this query."
 )
@@ -151,10 +168,16 @@ async def save_messages(
     messages: list[BaseMessage],
 ) -> None:
     for msg in messages:
-        role = msg.type  # "human", "ai", "tool", "system"
-        # Normalize chunk types (e.g. "AIMessageChunk" -> "ai")
-        if role.endswith("Chunk"):
-            role = {"AIMessageChunk": "ai", "HumanMessageChunk": "human", "SystemMessageChunk": "system"}.get(role, role)
+        if isinstance(msg, HumanMessage):
+            role = "human"
+        elif isinstance(msg, ToolMessage):
+            role = "tool"
+        elif isinstance(msg, AIMessage):
+            role = "ai"
+        elif isinstance(msg, SystemMessage):
+            role = "system"
+        else:
+            role = msg.type
         content = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
         tool_calls_json: str | None = None
         tool_call_id: str | None = None
@@ -258,6 +281,10 @@ def make_search_tool(
             # --- 2. Grade relevance ---
             if not results:
                 is_relevant = False
+            elif results[0].score >= HIGH_RELEVANCE_THRESHOLD:
+                is_relevant = True
+            elif results[0].score < LOW_RELEVANCE_THRESHOLD:
+                is_relevant = False
             else:
                 context_block = _format_results(results)
                 grade_messages = [
@@ -286,7 +313,11 @@ def make_search_tool(
             if attempt < MAX_RETRIES:
                 rewrite_messages = [
                     SystemMessage(content=REWRITE_PROMPT),
-                    HumanMessage(content=current_query),
+                    HumanMessage(
+                        content=f"Original query: {query}\nFailed query: {current_query}"
+                        if query != current_query
+                        else current_query
+                    ),
                 ]
                 rewrite_response = await llm.ainvoke(rewrite_messages)
                 new_query = rewrite_response.content.strip()
@@ -315,8 +346,6 @@ def make_search_tool(
 def _make_agent_node(llm_with_tools: BaseChatModel):
     async def agent(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         messages = state.get("messages", [])
-        if not any(isinstance(m, SystemMessage) for m in messages):
-            messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
         tagged_config = {**config, "tags": [*(config.get("tags") or []), "agent_llm"]}
         full_response = None
         async for chunk in llm_with_tools.astream(messages, config=tagged_config):
