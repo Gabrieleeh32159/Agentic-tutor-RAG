@@ -11,6 +11,7 @@ from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
 
 from app.documents.models import Document, DocumentChunk  # noqa: F401
+from app.chat.models import ChatMessage, ChatSession  # noqa: F401
 
 
 @asynccontextmanager

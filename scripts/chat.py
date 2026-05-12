@@ -1,4 +1,7 @@
-"""Interactive chat script that pretty-prints sources and streams the LLM answer."""
+"""Interactive chat script that pretty-prints sources and streams the LLM answer.
+
+Supports multi-turn conversations via session_id persistence.
+"""
 
 from __future__ import annotations
 
@@ -10,16 +13,11 @@ import httpx
 BASE_URL = "http://localhost:8000"
 
 
-def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: uv run python scripts/chat.py 'your question' [subject] [level]")
-        sys.exit(1)
-
-    question = sys.argv[1]
-    subject = sys.argv[2] if len(sys.argv) > 2 else None
-    level = sys.argv[3] if len(sys.argv) > 3 else None
-
+def chat_turn(question: str, session_id: str | None = None, subject: str | None = None, level: str | None = None) -> str | None:
+    """Send one message and stream the response. Returns the session_id."""
     payload: dict[str, str] = {"question": question}
+    if session_id:
+        payload["session_id"] = session_id
     if subject:
         payload["subject"] = subject
     if level:
@@ -27,11 +25,15 @@ def main() -> None:
 
     print(f"\n{'─' * 60}")
     print(f"  Question: {question}")
+    if session_id:
+        print(f"  Session:  {session_id}")
     if subject:
         print(f"  Subject:  {subject}")
     if level:
         print(f"  Level:    {level}")
     print(f"{'─' * 60}\n")
+
+    result_session_id = session_id
 
     with httpx.stream(
         "POST",
@@ -44,7 +46,7 @@ def main() -> None:
             print(response.read().decode())
             sys.exit(1)
 
-        sources_printed = False
+        answer_started = False
 
         for line in response.iter_lines():
             if not line.startswith("data: "):
@@ -58,7 +60,11 @@ def main() -> None:
 
             parsed = json.loads(data)
 
-            if "sources" in parsed and not sources_printed:
+            if "session_id" in parsed:
+                result_session_id = parsed["session_id"]
+                print(f"  📝 Session: {result_session_id}")
+
+            elif "sources" in parsed:
                 sources = parsed["sources"]
                 print("  📚 Source Documents:")
                 print(f"  {'─' * 50}")
@@ -72,7 +78,6 @@ def main() -> None:
                         preview = chunk["chunk_text"][:120].replace("\n", " ")
                         print(f"     Chunk {j} (score {chunk['score']:.4f}): {preview}...")
                 print(f"  {'─' * 50}\n")
-                sources_printed = True
 
             elif "step" in parsed:
                 step = parsed["step"]
@@ -81,20 +86,18 @@ def main() -> None:
                     print(f"  🔍 [{step}] {detail}")
                 elif step == "grade_documents":
                     is_relevant = parsed.get("is_relevant", False)
+                    grade_query = parsed.get("query", "")
                     icon = "✅" if is_relevant else "❌"
-                    print(f"  {icon} [{step}] {detail}")
-                elif step == "generate":
-                    print(f"  🤖 [{step}] {detail}\n")
-                    print("  💬 Answer:\n")
+                    print(f"  {icon} [{step}] Results for \"{grade_query}\" are {'relevant' if is_relevant else 'not relevant'}")
                 elif step == "rewrite_query":
                     retry = parsed.get("retry", 0)
                     new_q = parsed.get("new_question", "")
                     print(f"  🔄 [{step}] Attempt {retry}: \"{new_q}\"")
-                    sources_printed = False
-                elif step == "not_found":
-                    print(f"  ⚠️  [{step}] {detail}\n")
 
             elif "token" in parsed:
+                if not answer_started:
+                    print("  💬 Answer:\n")
+                    answer_started = True
                 sys.stdout.write(parsed["token"])
                 sys.stdout.flush()
 
@@ -103,6 +106,31 @@ def main() -> None:
                 sys.exit(1)
 
     print(f"{'─' * 60}")
+    return result_session_id
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("Usage: uv run python scripts/chat.py 'your question' [subject] [level]")
+        print("       After the first message, enter follow-up questions interactively.")
+        sys.exit(1)
+
+    question = sys.argv[1]
+    subject = sys.argv[2] if len(sys.argv) > 2 else None
+    level = sys.argv[3] if len(sys.argv) > 3 else None
+
+    session_id = chat_turn(question, subject=subject, level=level)
+
+    # Interactive follow-up loop
+    while True:
+        try:
+            follow_up = input("\n  Follow-up (or 'q' to quit): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Bye!")
+            break
+        if not follow_up or follow_up.lower() == "q":
+            break
+        session_id = chat_turn(follow_up, session_id=session_id)
 
 
 if __name__ == "__main__":

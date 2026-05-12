@@ -43,3 +43,12 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         )
     async with _session_factory() as session:
         yield session
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Return the session factory for manual session creation."""
+    if _session_factory is None:
+        raise RuntimeError(
+            "Database engine is not initialized. Call init_engine() first."
+        )
+    return _session_factory

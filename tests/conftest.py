@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 from unittest.mock import patch
@@ -10,7 +12,7 @@ import pytest
 from httpx import ASGITransport
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from sqlmodel import SQLModel
 
@@ -20,9 +22,17 @@ from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
 
 from app.documents.models import Document, DocumentChunk  # noqa: F401
+from app.chat.models import ChatSession, ChatMessage  # noqa: F401
 
 
 EMBEDDING_DIM = 1536
+
+# Keywords that indicate an academic question requiring tool use
+_ACADEMIC_KEYWORDS = [
+    "derivative", "cell", "biology", "math", "physics", "chemistry",
+    "history", "science", "equation", "theorem", "explain", "what is",
+    "how does", "describe", "calculate", "define",
+]
 
 
 class FakeEmbeddingProvider(EmbeddingProvider):
@@ -42,12 +52,28 @@ class FakeEmbeddingProvider(EmbeddingProvider):
         return [self._fake_vector(t) for t in texts]
 
 
+def _is_academic(text: str) -> bool:
+    lower = text.lower()
+    return any(kw in lower for kw in _ACADEMIC_KEYWORDS)
+
+
 class FakeChatModel(BaseChatModel):
-    """Deterministic fake chat model for tests."""
+    """Deterministic fake chat model that supports tool calling for tests."""
+
+    bound_tools: list[dict] = []
 
     @property
     def _llm_type(self) -> str:
         return "fake-chat-model"
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> FakeChatModel:
+        from langchain_core.utils.function_calling import convert_to_openai_tool
+
+        bound = []
+        for t in tools:
+            bound.append(convert_to_openai_tool(t))
+        model = FakeChatModel(bound_tools=bound)
+        return model
 
     def _generate(
         self,
@@ -56,10 +82,71 @@ class FakeChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        if any("relevance grader" in m.content.lower() for m in messages):
-            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="yes"))])
+        # --- Grader prompt ---
+        if any(
+            isinstance(m.content, str) and "relevance grader" in m.content.lower()
+            for m in messages
+        ):
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content="yes"))]
+            )
+
+        # --- Rewriter prompt ---
+        if any(
+            isinstance(m.content, str) and "query rewriter" in m.content.lower()
+            for m in messages
+        ):
+            return ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(content="rewritten academic question")
+                    )
+                ]
+            )
+
+        # --- After tool result: generate final answer ---
+        if any(isinstance(m, ToolMessage) for m in messages):
+            return ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(content="This is a test answer.")
+                    )
+                ]
+            )
+
+        # --- If tools are bound, decide whether to call them ---
+        if self.bound_tools:
+            # Find the last human message
+            last_human = ""
+            for m in reversed(messages):
+                if hasattr(m, "content") and isinstance(m.content, str) and m.type == "human":
+                    last_human = m.content
+                    break
+
+            if _is_academic(last_human):
+                tool_call_id = f"call_{uuid.uuid4().hex[:12]}"
+                msg = AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "search_documents",
+                            "args": {"query": last_human},
+                            "id": tool_call_id,
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+                return ChatResult(
+                    generations=[ChatGeneration(message=msg)]
+                )
+
+        # --- Default: casual / direct response ---
         return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content="This is a test answer."))]
+            generations=[
+                ChatGeneration(
+                    message=AIMessage(content="Hello! How can I help you today?")
+                )
+            ]
         )
 
     def _stream(
@@ -70,7 +157,31 @@ class FakeChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         result = self._generate(messages, stop, run_manager, **kwargs)
-        text = result.generations[0].message.content
+        msg = result.generations[0].message
+
+        # Tool calls: emit as a single chunk with tool_call_chunks AND tool_calls
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(
+                    content="",
+                    tool_calls=msg.tool_calls,
+                    tool_call_chunks=[
+                        {
+                            "name": tc["name"],
+                            "args": json.dumps(tc["args"]),
+                            "id": tc["id"],
+                            "index": i,
+                        }
+                        for i, tc in enumerate(msg.tool_calls)
+                    ],
+                )
+            )
+            return
+
+        # Text response: stream word by word
+        text = msg.content
+        if not text:
+            return
         words = text.split(" ")
         for i, word in enumerate(words):
             token = word if i == len(words) - 1 else word + " "
