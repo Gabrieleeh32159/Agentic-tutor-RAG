@@ -1,124 +1,107 @@
-# Take-Home Challenge: Educational Content RAG Service
+# Agentic RAG — Educational Study Assistant
 
-Welcome! This is a practical backend + AI engineering challenge modeled after a real-world problem: building a small, production-ready slice of an educational content retrieval and AI-tutor service.
+A small, production-minded backend that ingests educational documents, indexes them with OpenAI embeddings in **pgvector**, and answers student questions with a **self-correcting agentic RAG** loop over a streaming API. It ships with a Streamlit UI that visualises the agent's retrieve → grade → rewrite reasoning step by step.
 
-The challenge is organized in four progressive steps. **You do not have to finish all four** to be considered -- quality over completeness. Leave notes in your `NOTES.md` about anything you skipped and why.
+This started as a take-home exercise and I've kept extending it as a personal playground for retrieval, LangGraph agents, and async FastAPI patterns.
 
-## Context
+## What it does
 
-You are building a backend service that:
+- **Ingests** documents (`title`, `content`, `subject`, `level`), chunks them, and stores per-chunk embeddings in pgvector.
+- **Searches** semantically by cosine similarity, with optional `subject` / `level` filters and similarity scores.
+- **Answers** questions with an agent that decides *whether* to retrieve, grades the relevance of what it finds, and **rewrites the query and retries** when results are weak — then streams a cited, Markdown/LaTeX-formatted answer.
+- **Remembers** conversations: sessions and message history are persisted, so chats are multi-turn.
 
-1. **Ingests** educational documents (title + content + subject + level).
-2. **Indexes** them for semantic search using OpenAI embeddings + pgvector.
-3. **Answers** student questions using Retrieval-Augmented Generation (RAG), citing the relevant documents.
-4. **Generates** study flashcards from any indexed document using structured LLM output.
+## Architecture at a glance
 
-This is a simplified version of patterns used in real edtech AI platforms -- semantic content retrieval, multi-provider LLM orchestration, structured outputs for educational artifacts.
+```
+                ┌──────────────┐   embed (enriched: title+subject+level+chunk)
+  POST /documents│  documents   │──────────────────────────────┐
+                └──────────────┘                               ▼
+                                                        ┌──────────────┐
+  GET /search ──────────────────────────────────────►  │   pgvector   │
+                                                        │ document_    │
+                ┌──────────────┐                        │  chunks      │
+  POST /chat ──►│  LangGraph   │  search_documents tool │ (Vector 1536)│
+                │    agent     │──(in-process ASGI)────► └──────────────┘
+                │ agent⇄tools  │        │  GET /search
+                └──────┬───────┘        ▼
+                       │         retrieve → grade relevance → rewrite → retry
+                       ▼
+                  SSE stream: tokens + step events + sources + [DONE]
+```
 
-## Tech stack (fixed)
+The agentic RAG tool (`app/chat/tools.py`) is the heart of it. On each search it grades the top result: high score → use it, low score → reject, in-between → an LLM grader decides. If results are weak and retries remain, it rewrites the query and tries again before giving up. Every step is surfaced to the client as a server-sent event, which the Streamlit UI renders live.
 
-- **Python 3.13+** with [uv](https://docs.astral.sh/uv/) as the package manager
-- **FastAPI** for the HTTP layer, **async throughout**
-- **PostgreSQL 16** with the **pgvector** extension (provided via `docker-compose.yml`)
-- **SQLAlchemy (async)** + **SQLModel** for ORM, **asyncpg** as the driver
-- **Pydantic v2** for all request/response schemas
-- **OpenAI** for embeddings. **OpenAI or Anthropic** for chat (your choice, or both with a fallback)
-- **pytest** + **pytest-asyncio** for tests
+For a deeper tour of the design (chunking strategy, why search runs over an in-process HTTP call, persistence ordering, provider abstractions), see **[CLAUDE.md](CLAUDE.md)**. Design decisions and trade-offs are in **[NOTES.md](NOTES.md)**.
 
-A `pyproject.toml` scaffold with the core dependencies is already included. You may add more if you need to.
+## Tech stack
 
-## Steps
-
-### Step 1 -- Ingestion API
-
-Build a `POST /documents` endpoint that:
-
-- Accepts a JSON body with `title`, `content`, `subject`, `level` (use `introductory | intermediate | advanced`).
-- Stores the document in PostgreSQL.
-- Generates an embedding with OpenAI (`text-embedding-3-small` is fine) from the `content`.
-- Stores the embedding in a `pgvector` column.
-- Returns the created document's `id` and basic metadata.
-
-A sample dataset is provided at `data/documents.jsonl`. Provide a way to bulk-ingest it (a CLI script or an endpoint -- your call).
-
-### Step 2 -- Semantic Search
-
-Build a `GET /search` endpoint:
-
-- Query params: `q` (required), `limit` (default 5, max 20), optional `subject`, optional `level`.
-- Converts `q` to an embedding using the same model as ingestion.
-- Returns the top `limit` documents by **cosine similarity**, optionally filtered by `subject` / `level`.
-- Response must include the similarity score for each result.
-
-### Step 3 -- AI Study Assistant / RAG
-
-Build a `POST /chat` endpoint:
-
-- Accepts a JSON body with `question` (string) and optional `subject` / `level` filters.
-- Retrieves relevant documents using the semantic search from Step 2.
-- Answers the student's question grounded in the retrieved context, citing the source documents.
-- Calls an LLM (OpenAI **or** Anthropic, candidate's choice).
-- Returns a **streaming** response.
-- The response must also include the list of document IDs that were retrieved as context.
-
-**Bonus**: support both OpenAI and Anthropic with a fallback mechanism -- if the primary provider errors out, try the secondary.
-
-### Step 4 -- Flashcard Generation (Bonus)
-
-Build a `POST /flashcards/generate` endpoint:
-
-- Accepts a `document_id` (and optional `count`, default 5).
-- Loads the document.
-- Uses the LLM with **structured output** (function calling, JSON mode, or `pydantic-ai`) to generate `count` flashcards, each with `question`, `answer`, `difficulty` (`easy | medium | hard`).
-- Returns the generated flashcards.
-
-Do not persist the flashcards -- just return them. What matters here is the structured-output prompt engineering, not storage.
-
-## What "done" looks like
-
-- The service runs end-to-end from a clean clone: `docker compose up -d` + the run command below, and every endpoint you implemented responds correctly.
-- The codebase is ready for a team code review. You decide what that means.
-- No hardcoded secrets in the repo.
-- `NOTES.md` is filled in (it anchors our sync technical interview).
-
-## Time target
-
-4 to 6 hours for Steps 1-3. Step 4 is explicitly a bonus. There is no hard deadline once you accept the GitHub invitation -- quality is what matters.
+- **Python 3.13+** with [uv](https://docs.astral.sh/uv/)
+- **FastAPI**, async throughout
+- **PostgreSQL 16 + pgvector** for vector storage and cosine search
+- **SQLAlchemy (async)** + **SQLModel** + **asyncpg**
+- **Pydantic v2** for all schemas
+- **LangChain / LangGraph** for the agent; **OpenAI** embeddings + chat, with optional **Anthropic** fallback
+- **Streamlit** for the visual chat UI
+- **pytest** + **pytest-asyncio**
 
 ## Getting started
 
 ```bash
-# 1. Install uv if you do not have it
-# https://docs.astral.sh/uv/
+# 1. Install uv — https://docs.astral.sh/uv/
 
 # 2. Install dependencies
 uv sync
 
-# 3. Copy and fill the env file
-cp .env.example .env   # at minimum, set OPENAI_API_KEY
+# 3. Configure environment (at minimum set OPENAI_API_KEY)
+cp .env.example .env
 
 # 4. Start Postgres + pgvector
 docker compose up -d
 
-# 5. Run the service
+# 5. Run the API (tables are created automatically on startup)
 uv run fastapi dev app/main.py
 
-# 6. Run the tests
-uv run pytest
+# 6. Load the sample dataset (20 docs across math, biology, history, programming, science)
+uv run python scripts/ingest_documents.py
+
+# 7. Chat with it
+uv run streamlit run scripts/streamlit_app.py   # visual UI at http://localhost:8501
+#   or
+uv run python scripts/chat.py                    # terminal client
 ```
 
-## Submission
+Set `ANTHROPIC_API_KEY` as well to enable automatic fallback if OpenAI errors out.
 
-When you are ready:
+## API
 
-1. Make sure the repo builds and tests pass on a clean clone.
-2. Fill in `NOTES.md` with:
-   - Your main technical decisions and **why** (provider choice, data model, prompt design, retrieval strategy, etc.).
-   - Any trade-offs or things you deliberately left out.
-   - What you would do next if you had more time.
-3. Push your final commit to the `main` branch of this repo.
-4. Reply to the email we sent you, and include a short (~5 min) Loom screencast walking through your solution.
+| Method & path | Description |
+|---|---|
+| `POST /documents` | Ingest one document; chunks + embeds it. |
+| `POST /documents/bulk` | Ingest a batch (used by the loader script). |
+| `GET /search` | Semantic search: `q` (required), `limit` (1–20), optional `subject`, `level`. Returns documents with similarity scores and matched chunks. |
+| `POST /chat` | Ask a question; returns an SSE stream of tokens, retrieval/grade/rewrite step events, and the source documents. Pass `session_id` to continue a conversation. |
+| `GET /chat/sessions` | List chat sessions. |
+| `GET /chat/sessions/{id}/messages` | Full message history for a session. |
+| `DELETE /chat/sessions/{id}` | Delete a session and its messages. |
+| `GET /health` | Liveness probe. |
 
-Good luck, and have fun -- this is meant to be a realistic slice of the work, not a gotcha.
+Interactive docs at `http://localhost:8000/docs` once the server is running.
 
-We evaluate architecture, AI integration quality, data modeling, and production readiness -- but we care more about thoughtful decisions than feature completeness.
+## Tests
+
+```bash
+uv run pytest            # needs Postgres running
+uv run ruff check .      # lint
+```
+
+Tests swap in deterministic fake embedding and chat models, so **no API keys are needed to run them** — the full LangGraph + SSE path is exercised end to end. Note that each test drops and recreates all tables, so point tests at a throwaway database.
+
+## Roadmap
+
+Things I want to explore next (see [NOTES.md](NOTES.md) for context):
+
+- Add an ANN index (IVFFlat / HNSW) on the embedding column — search is currently exact.
+- Richer chunk metadata and hybrid (keyword + vector) retrieval.
+- Flashcard generation from a document using structured LLM output.
+- LLM-graded evaluation of retrieval quality.
