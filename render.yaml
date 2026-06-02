@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: agentic-rag-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      # Neon connection string. IMPORTANT (see README/deploy notes):
+      #   - scheme must be   postgresql+asyncpg://
+      #   - use the DIRECT host (not the -pooler endpoint)
+      #   - replace ?sslmode=require with ?ssl=require   (asyncpg, not libpq)
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false

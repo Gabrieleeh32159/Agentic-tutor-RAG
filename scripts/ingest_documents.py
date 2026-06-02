@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
 
-API_URL = "http://localhost:8000/documents/bulk"
+# Base URL of the running API. Override for a deployed target, e.g.:
+#   API_BASE_URL=https://agentic-rag-api.onrender.com uv run python scripts/ingest_documents.py
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
+API_URL = f"{API_BASE_URL}/documents/bulk"
 JSONL_PATH = Path(__file__).resolve().parent.parent / "data" / "documents.jsonl"
 BATCH_SIZE = 10
 
@@ -17,6 +21,7 @@ def main() -> None:
             items.append(json.loads(line))
 
     print(f"Loaded {len(items)} documents from {JSONL_PATH.name}")
+    print(f"Target: {API_URL}")
 
     with httpx.Client(timeout=60) as client:
         for i in range(0, len(items), BATCH_SIZE):

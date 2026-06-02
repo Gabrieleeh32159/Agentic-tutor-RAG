@@ -16,7 +16,13 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 def init_engine(database_url: str) -> None:
     """Initialize the async engine and session factory. Call once at startup."""
     global _engine, _session_factory
-    _engine = create_async_engine(database_url, echo=False, future=True)
+    _engine = create_async_engine(
+        database_url,
+        echo=False,
+        future=True,
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
     _session_factory = async_sessionmaker(
         bind=_engine, expire_on_commit=False, class_=AsyncSession
     )
