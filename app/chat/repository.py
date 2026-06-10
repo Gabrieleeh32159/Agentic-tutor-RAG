@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
 
 from langchain_core.messages import (
     AIMessage,
@@ -14,54 +13,7 @@ from langchain_core.messages import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.models import ChatMessage, ChatSession
-
-
-async def create_session(
-    session: AsyncSession,
-    *,
-    subject: str | None = None,
-    level: str | None = None,
-) -> ChatSession:
-    chat_session = ChatSession(subject=subject, level=level)
-    session.add(chat_session)
-    await session.commit()
-    await session.refresh(chat_session)
-    return chat_session
-
-
-async def get_session_by_id(
-    session: AsyncSession,
-    session_id: uuid.UUID,
-) -> ChatSession | None:
-    return await session.get(ChatSession, session_id)
-
-
-async def update_session_title(
-    session: AsyncSession,
-    chat_session: ChatSession,
-    title: str,
-) -> None:
-    chat_session.title = title[:120]
-    chat_session.updated_at = datetime.now(UTC)
-    session.add(chat_session)
-    await session.commit()
-
-
-async def list_sessions(session: AsyncSession) -> list[ChatSession]:
-    result = await session.execute(
-        select(ChatSession).order_by(ChatSession.created_at.desc())
-    )
-    return list(result.scalars().all())
-
-
-async def delete_session(session: AsyncSession, session_id: uuid.UUID) -> bool:
-    chat_session = await session.get(ChatSession, session_id)
-    if chat_session is None:
-        return False
-    await session.delete(chat_session)
-    await session.commit()
-    return True
+from app.chat.models import ChatMessage
 
 
 async def load_session_messages(
@@ -106,7 +58,9 @@ async def save_messages(
             role = "system"
         else:
             role = msg.type
-        content = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
+        content = (
+            msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
+        )
         tool_calls_json: str | None = None
         tool_call_id: str | None = None
 

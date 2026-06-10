@@ -5,6 +5,8 @@ import uuid
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.models import ChatMessageResponse
+from app.chat.repository import get_session_messages
 from app.documents.models import DocumentResponse
 from app.documents.service import list_documents
 from app.sessions import service
@@ -34,10 +36,30 @@ async def get_session_detail(
         created_at=session.created_at,
         last_activity_at=session.last_activity_at,
         documents=[
-            DocumentResponse.model_validate(d, from_attributes=True)
-            for d in documents
+            DocumentResponse.model_validate(d, from_attributes=True) for d in documents
         ],
     )
+
+
+@router.get("/{session_id}/messages", response_model=list[ChatMessageResponse])
+async def get_messages(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> list[ChatMessageResponse]:
+    session = await service.get_active_session(db, session_id)
+    await service.touch_session(db, session)
+    messages = await get_session_messages(db, session_id)
+    return [
+        ChatMessageResponse(
+            id=m.id,
+            role=m.role,
+            content=m.content,
+            tool_calls=m.tool_calls,
+            tool_call_id=m.tool_call_id,
+            created_at=m.created_at,
+        )
+        for m in messages
+    ]
 
 
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

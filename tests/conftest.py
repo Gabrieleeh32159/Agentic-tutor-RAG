@@ -17,7 +17,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from sqlmodel import SQLModel
 
 import app.shared.embeddings as embeddings_module
-from app.chat.models import ChatMessage, ChatSession  # noqa: F401
+from app.chat.models import ChatMessage  # noqa: F401
 from app.documents.models import Document, DocumentChunk  # noqa: F401
 from app.sessions.models import Session  # noqa: F401
 from app.shared.config import get_settings
@@ -28,9 +28,22 @@ EMBEDDING_DIM = 1536
 
 # Keywords that indicate an academic question requiring tool use
 _ACADEMIC_KEYWORDS = [
-    "derivative", "cell", "biology", "math", "physics", "chemistry",
-    "history", "science", "equation", "theorem", "explain", "what is",
-    "how does", "describe", "calculate", "define",
+    "derivative",
+    "cell",
+    "biology",
+    "math",
+    "physics",
+    "chemistry",
+    "history",
+    "science",
+    "equation",
+    "theorem",
+    "explain",
+    "what is",
+    "how does",
+    "describe",
+    "calculate",
+    "define",
 ]
 
 
@@ -107,9 +120,7 @@ class FakeChatModel(BaseChatModel):
         if any(isinstance(m, ToolMessage) for m in messages):
             return ChatResult(
                 generations=[
-                    ChatGeneration(
-                        message=AIMessage(content="This is a test answer.")
-                    )
+                    ChatGeneration(message=AIMessage(content="This is a test answer."))
                 ]
             )
 
@@ -118,7 +129,11 @@ class FakeChatModel(BaseChatModel):
             # Find the last human message
             last_human = ""
             for m in reversed(messages):
-                if hasattr(m, "content") and isinstance(m.content, str) and m.type == "human":
+                if (
+                    hasattr(m, "content")
+                    and isinstance(m.content, str)
+                    and m.type == "human"
+                ):
                     last_human = m.content
                     break
 
@@ -135,9 +150,7 @@ class FakeChatModel(BaseChatModel):
                         }
                     ],
                 )
-                return ChatResult(
-                    generations=[ChatGeneration(message=msg)]
-                )
+                return ChatResult(generations=[ChatGeneration(message=msg)])
 
         # --- Default: casual / direct response ---
         return ChatResult(

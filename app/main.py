@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
 
-from app.chat.models import ChatMessage, ChatSession  # noqa: F401
+from app.chat.models import ChatMessage  # noqa: F401
 from app.documents.models import Document, DocumentChunk  # noqa: F401
 from app.sessions.models import Session  # noqa: F401
 from app.shared.config import get_settings

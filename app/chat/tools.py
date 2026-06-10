@@ -28,7 +28,7 @@ def _format_results(results: list[SearchResult]) -> str:
     idx = 1
     for doc in results:
         for chunk in doc.chunks:
-            parts.append(f"[{idx}] Title: {doc.title}\n{chunk.chunk_text}")
+            parts.append(f"[{idx}] File: {doc.filename}\n{chunk.chunk_text}")
             idx += 1
     return "\n\n".join(parts) if parts else "No results found."
 
@@ -40,11 +40,10 @@ def make_search_tool(
     @tool
     async def search_documents(
         query: str,
-        subject: Annotated[str | None, InjectedState("subject")] = None,
-        level: Annotated[str | None, InjectedState("level")] = None,
+        session_id: Annotated[str, InjectedState("session_id")],
         config: RunnableConfig | None = None,
     ) -> str:
-        """Search the educational knowledge base for documents relevant to a student's question. Use this tool when the student asks an academic or knowledge-based question that requires looking up information."""
+        """Search the user's uploaded documents for content relevant to their question. Use this tool whenever the user asks about the content of their documents or any factual/knowledge question."""
         current_query = query
 
         for attempt in range(MAX_RETRIES + 1):
@@ -52,11 +51,8 @@ def make_search_tool(
             params: dict[str, str | int] = {
                 "q": current_query,
                 "limit": CONTEXT_LIMIT,
+                "session_id": session_id,
             }
-            if subject:
-                params["subject"] = subject
-            if level:
-                params["level"] = level
 
             response = await http_client.get("/search", params=params)
             response.raise_for_status()
@@ -65,7 +61,7 @@ def make_search_tool(
             sources = [
                 {
                     "document_id": str(doc.document_id),
-                    "title": doc.title,
+                    "filename": doc.filename,
                     "score": doc.score,
                     "chunks": [
                         {
@@ -98,8 +94,7 @@ def make_search_tool(
                     SystemMessage(content=GRADER_PROMPT),
                     HumanMessage(
                         content=(
-                            f"Question: {current_query}\n\n"
-                            f"Documents:\n{context_block}"
+                            f"Question: {current_query}\n\nDocuments:\n{context_block}"
                         )
                     ),
                 ]
@@ -109,7 +104,11 @@ def make_search_tool(
 
             await adispatch_custom_event(
                 "grade_result",
-                {"is_relevant": is_relevant, "attempt": attempt, "query": current_query},
+                {
+                    "is_relevant": is_relevant,
+                    "attempt": attempt,
+                    "query": current_query,
+                },
                 config=config,
             )
 
