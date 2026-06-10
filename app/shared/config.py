@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     CHAT_MODEL: str = "gpt-4o-mini"
 
+    SESSION_TTL_HOURS: int = 24
+
     APP_ENV: str = "local"
     LOG_LEVEL: str = "INFO"
 

@@ -19,6 +19,7 @@ from sqlmodel import SQLModel
 import app.shared.embeddings as embeddings_module
 from app.chat.models import ChatMessage, ChatSession  # noqa: F401
 from app.documents.models import Document, DocumentChunk  # noqa: F401
+from app.sessions.models import Session  # noqa: F401
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
 from app.shared.embeddings import EmbeddingProvider

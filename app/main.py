@@ -9,6 +9,7 @@ from sqlmodel import SQLModel
 
 from app.chat.models import ChatMessage, ChatSession  # noqa: F401
 from app.documents.models import Document, DocumentChunk  # noqa: F401
+from app.sessions.models import Session  # noqa: F401
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
 from app.shared.errors import register_exception_handlers
@@ -57,7 +58,9 @@ async def health() -> dict[str, str]:
 from app.chat.router import router as chat_router  # noqa: E402
 from app.documents.router import router as documents_router  # noqa: E402
 from app.search.router import router as search_router  # noqa: E402
+from app.sessions.router import router as sessions_router  # noqa: E402
 
 app.include_router(documents_router)
 app.include_router(search_router)
 app.include_router(chat_router)
+app.include_router(sessions_router)
