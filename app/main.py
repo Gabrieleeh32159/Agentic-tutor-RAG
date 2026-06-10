@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -8,17 +7,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
 
+from app.chat.models import ChatMessage, ChatSession  # noqa: F401
+from app.documents.models import Document, DocumentChunk  # noqa: F401
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
-
-from app.documents.models import Document, DocumentChunk  # noqa: F401
-from app.chat.models import ChatMessage, ChatSession  # noqa: F401
+from app.shared.logging import RequestIDMiddleware, setup_logging
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    logging.basicConfig(level=settings.LOG_LEVEL.upper())
+    setup_logging(settings.LOG_LEVEL)
     init_engine(settings.DATABASE_URL)
 
     async with get_engine().begin() as conn:
@@ -36,6 +35,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -51,14 +51,9 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# TODO (candidate):
-# Wire your feature routers here, e.g.:
-#   from app.documents.router import router as documents_router
-#   app.include_router(documents_router)
-
-from app.documents.router import router as documents_router
-from app.search.router import router as search_router
-from app.chat.router import router as chat_router
+from app.chat.router import router as chat_router  # noqa: E402
+from app.documents.router import router as documents_router  # noqa: E402
+from app.search.router import router as search_router  # noqa: E402
 
 app.include_router(documents_router)
 app.include_router(search_router)
