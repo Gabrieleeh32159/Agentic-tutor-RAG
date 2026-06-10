@@ -18,7 +18,7 @@ async def search(
     limit: int = Query(5, ge=1, le=20),
     subject: str | None = Query(None),
     level: Literal["introductory", "intermediate", "advanced"] | None = Query(None),
-    session: AsyncSession = Depends(get_session),  # noqa: B008
+    session: AsyncSession = Depends(get_session),
 ) -> list[SearchResult]:
     return await search_documents(
         session=session,

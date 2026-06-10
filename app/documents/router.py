@@ -17,7 +17,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 )
 async def ingest_document(
     data: DocumentCreate,
-    session: AsyncSession = Depends(get_session),  # noqa: B008
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentResponse:
     document = await create_document(session, data)
     return DocumentResponse.model_validate(document)
@@ -30,7 +30,7 @@ async def ingest_document(
 )
 async def ingest_documents_bulk(
     data: list[DocumentCreate],
-    session: AsyncSession = Depends(get_session),  # noqa: B008
+    session: AsyncSession = Depends(get_session),
 ) -> list[DocumentResponse]:
     documents = await bulk_create_documents(session, data)
     return [DocumentResponse.model_validate(doc) for doc in documents]
