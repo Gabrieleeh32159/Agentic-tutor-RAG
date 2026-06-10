@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from langchain_core.messages import (
     AIMessage,
@@ -43,7 +43,7 @@ async def update_session_title(
     title: str,
 ) -> None:
     chat_session.title = title[:120]
-    chat_session.updated_at = datetime.now(timezone.utc)
+    chat_session.updated_at = datetime.now(UTC)
     session.add(chat_session)
     await session.commit()
 

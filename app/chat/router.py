@@ -40,7 +40,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 async def chat(
     body: ChatRequest,
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> StreamingResponse:
     # --- Session management ---
     if body.session_id:
@@ -158,7 +158,7 @@ async def chat(
 
 @router.get("/sessions", response_model=list[ChatSessionResponse])
 async def get_sessions(
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[ChatSessionResponse]:
     sessions = await list_sessions(session)
     return [
@@ -177,7 +177,7 @@ async def get_sessions(
 @router.get("/sessions/{session_id}/messages", response_model=list[ChatMessageResponse])
 async def get_messages(
     session_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[ChatMessageResponse]:
     chat_session = await get_session_by_id(session, session_id)
     if chat_session is None:
@@ -199,7 +199,7 @@ async def get_messages(
 @router.delete("/sessions/{session_id}", status_code=204)
 async def remove_session(
     session_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> None:
     deleted = await delete_session(session, session_id)
     if not deleted:

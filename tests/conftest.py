@@ -17,13 +17,11 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from sqlmodel import SQLModel
 
 import app.shared.embeddings as embeddings_module
-from app.shared.embeddings import EmbeddingProvider
+from app.chat.models import ChatMessage, ChatSession  # noqa: F401
+from app.documents.models import Document, DocumentChunk  # noqa: F401
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
-
-from app.documents.models import Document, DocumentChunk  # noqa: F401
-from app.chat.models import ChatSession, ChatMessage  # noqa: F401
-
+from app.shared.embeddings import EmbeddingProvider
 
 EMBEDDING_DIM = 1536
 
@@ -212,7 +210,7 @@ def mock_chat_model():
 
 
 @pytest.fixture(autouse=True)
-async def _init_db() -> AsyncIterator[None]: 
+async def _init_db() -> AsyncIterator[None]:
     """Initialize the DB engine and create tables for each test (avoids event-loop mismatch)."""
     settings = get_settings()
     init_engine(settings.DATABASE_URL)

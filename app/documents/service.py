@@ -7,7 +7,7 @@ from app.documents.models import Document, DocumentChunk, DocumentCreate
 from app.shared.embeddings import get_embedding_provider
 
 _splitter = RecursiveCharacterTextSplitter(
-    separators=["\n\n", "\n", r"(?<=\. )"], 
+    separators=["\n\n", "\n", r"(?<=\. )"],
     is_separator_regex=True,
     chunk_size=300,
     chunk_overlap=50
@@ -52,7 +52,7 @@ async def create_document(
             chunk_text=chunk,
             embedding=embedding,
         )
-        for chunk, embedding in zip(chunks, embeddings)
+        for chunk, embedding in zip(chunks, embeddings, strict=False)
     ]
     session.add_all(chunk_models)
 
@@ -84,7 +84,7 @@ async def bulk_create_documents(
     embeddings = await provider.embed_batch(all_enriched) if all_enriched else []
 
     documents: list[Document] = []
-    for item, count in zip(items, chunk_counts):
+    for item, count in zip(items, chunk_counts, strict=False):
         doc = Document(
             title=item.title,
             content=item.content,
@@ -97,7 +97,7 @@ async def bulk_create_documents(
     await session.flush()
 
     chunk_models: list[DocumentChunk] = []
-    for (doc_idx, chunk_text), embedding in zip(all_chunks, embeddings):
+    for (doc_idx, chunk_text), embedding in zip(all_chunks, embeddings, strict=False):
         chunk_models.append(
             DocumentChunk(
                 document_id=documents[doc_idx].id,

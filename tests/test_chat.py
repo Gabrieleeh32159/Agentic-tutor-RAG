@@ -85,7 +85,7 @@ async def test_chat_stream_contains_sources(
         json={"question": "What is a derivative?"},
     )
     lines = _parse_sse(response.text)
-    sources_lines = [l for l in lines if '"sources"' in l]
+    sources_lines = [ln for ln in lines if '"sources"' in ln]
     assert len(sources_lines) > 0
     parsed = json.loads(sources_lines[0].removeprefix("data: "))
     assert "sources" in parsed
@@ -105,7 +105,7 @@ async def test_chat_stream_contains_tokens(
         json={"question": "What is a derivative?"},
     )
     lines = _parse_sse(response.text)
-    token_lines = [l for l in lines if '"token"' in l]
+    token_lines = [ln for ln in lines if '"token"' in ln]
     assert len(token_lines) > 0
     assert lines[-1] == "data: [DONE]"
 
@@ -145,7 +145,7 @@ async def test_chat_with_subject_filter(
     )
     assert response.status_code == 200
     lines = _parse_sse(response.text)
-    sources_line = next(l for l in lines if '"sources"' in l)
+    sources_line = next(ln for ln in lines if '"sources"' in ln)
     parsed = json.loads(sources_line.removeprefix("data: "))
     for src in parsed["sources"]:
         assert src["title"] == "Cell Structure"
@@ -162,7 +162,7 @@ async def test_chat_casual_no_search(client: httpx.AsyncClient) -> None:
     response = await client.post("/chat", json={"question": "Hola"})
     assert response.status_code == 200
     lines = _parse_sse(response.text)
-    sources_lines = [l for l in lines if '"sources"' in l]
+    sources_lines = [ln for ln in lines if '"sources"' in ln]
     assert len(sources_lines) == 0
     full_answer = _collect_tokens(lines)
     assert len(full_answer) > 0
@@ -356,7 +356,7 @@ async def test_chat_multiturn_with_tools(
     assert r2.status_code == 200
     lines2 = _parse_sse(r2.text)
     # Should NOT contain an error
-    error_lines = [l for l in lines2 if '"error"' in l]
+    error_lines = [ln for ln in lines2 if '"error"' in ln]
     assert len(error_lines) == 0, f"Got errors: {error_lines}"
     # Should end with [DONE]
     assert lines2[-1] == "data: [DONE]"

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypedDict
 
 from langgraph.graph import add_messages
 from pydantic import BaseModel, Field
@@ -12,9 +12,6 @@ from sqlmodel import Field as SQLField
 from sqlmodel import SQLModel
 
 from app.search.models import SearchResult  # noqa: F401
-
-from typing import TypedDict
-
 
 # ---------------------------------------------------------------------------
 # Enum for graph node names
@@ -42,11 +39,11 @@ class ChatSession(SQLModel, table=True):
         sa_column=Column(String(20), nullable=True),
     )
     created_at: datetime = SQLField(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = SQLField(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
@@ -71,7 +68,7 @@ class ChatMessage(SQLModel, table=True):
         default=None, sa_column=Column(String(64), nullable=True)
     )
     created_at: datetime = SQLField(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 

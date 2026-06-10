@@ -3,7 +3,6 @@ from __future__ import annotations
 import httpx
 import pytest
 
-
 SAMPLE_DOC = {
     "title": "Test Document",
     "content": "This is a test document about calculus.",
