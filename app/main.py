@@ -11,6 +11,7 @@ from app.chat.models import ChatMessage, ChatSession  # noqa: F401
 from app.documents.models import Document, DocumentChunk  # noqa: F401
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
+from app.shared.errors import register_exception_handlers
 from app.shared.logging import RequestIDMiddleware, setup_logging
 
 
@@ -36,6 +37,7 @@ app = FastAPI(
 )
 
 app.add_middleware(RequestIDMiddleware)
+register_exception_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
