@@ -93,8 +93,14 @@ async def process_text_document(
         document.stage = None
         document.error_code = "processing_failed"
         document.error_message = "Failed to process the document."
-        db.add(document)
-        await db.commit()
+        try:
+            db.add(document)
+            await db.commit()
+        except Exception:
+            logger.exception(
+                "Could not persist FAILED status for document %s", document.id
+            )
+            return document
     await db.refresh(document)
     return document
 

@@ -49,8 +49,8 @@ async def upload_document(
             f"Unsupported file type '{ext or filename}'. Supported: {supported}"
         )
 
-    data = await file.read()
     settings = get_settings()
+    data = await file.read(settings.MAX_UPLOAD_BYTES + 1)
     if len(data) > settings.MAX_UPLOAD_BYTES:
         limit_mb = settings.MAX_UPLOAD_BYTES // (1024 * 1024)
         raise FileTooLargeError(f"File exceeds the {limit_mb} MB limit")
@@ -59,6 +59,9 @@ async def upload_document(
         text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ParseFailedError("File is not valid UTF-8 text") from exc
+
+    if not text.strip():
+        raise ParseFailedError("File contains no text")
 
     document = await create_pending_document(
         db,

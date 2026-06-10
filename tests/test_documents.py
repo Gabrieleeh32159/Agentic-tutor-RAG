@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 import httpx
+import pytest
 
 MD_CONTENT = b"# Calculus Notes\n\nA derivative measures how a function changes as its input changes."
 
@@ -153,3 +154,71 @@ async def test_session_detail_includes_documents(client: httpx.AsyncClient) -> N
     data = response.json()
     assert len(data["documents"]) == 1
     assert data["documents"][0]["filename"] == "notes.md"
+
+
+async def test_upload_empty_file_returns_422(client: httpx.AsyncClient) -> None:
+    sid = await _create_session(client)
+    response = await client.post(
+        f"/sessions/{sid}/documents",
+        files=_upload("empty.txt", b"   \n", "text/plain"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "PARSE_FAILED"
+
+
+async def test_processing_failure_marks_document_failed(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.shared.embeddings as embeddings_module
+    from app.shared.embeddings import EmbeddingProvider
+
+    class BoomProvider(EmbeddingProvider):
+        async def embed(self, text: str) -> list[float]:
+            raise RuntimeError("embedding provider down")
+
+        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("embedding provider down")
+
+    monkeypatch.setattr(embeddings_module, "_provider", BoomProvider())
+
+    sid = await _create_session(client)
+    response = await client.post(
+        f"/sessions/{sid}/documents",
+        files=_upload("notes.md", MD_CONTENT, "text/markdown"),
+    )
+    assert response.status_code == 202
+    data = response.json()
+    assert data["status"] == "failed"
+    assert data["error_code"] == "processing_failed"
+    assert data["error_message"]
+    assert data["chunk_count"] == 0
+
+
+async def test_search_excludes_failed_documents(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.shared.embeddings as embeddings_module
+    from app.shared.embeddings import EmbeddingProvider
+
+    sid = await _create_session(client)
+
+    class BoomProvider(EmbeddingProvider):
+        async def embed(self, text: str) -> list[float]:
+            raise RuntimeError("embedding provider down")
+
+        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("embedding provider down")
+
+    saved = embeddings_module._provider
+    monkeypatch.setattr(embeddings_module, "_provider", BoomProvider())
+    await client.post(
+        f"/sessions/{sid}/documents",
+        files=_upload("broken.md", MD_CONTENT, "text/markdown"),
+    )
+    monkeypatch.setattr(embeddings_module, "_provider", saved)
+
+    response = await client.get(
+        "/search", params={"q": "derivative", "session_id": sid}
+    )
+    assert response.status_code == 200
+    assert response.json() == []
