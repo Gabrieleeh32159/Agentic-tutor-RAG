@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from sqlalchemy import update
+
+from app.sessions.models import Session
+from app.shared.database import get_session_factory
 
 MD_DERIVATIVES = b"A derivative measures how a function changes as its input changes."
 MD_CELLS = b"Eukaryotic cells contain membrane-bound organelles."
@@ -233,3 +238,34 @@ async def test_chat_empty_question(client: httpx.AsyncClient) -> None:
 async def test_messages_endpoint_unknown_session(client: httpx.AsyncClient) -> None:
     response = await client.get(f"/sessions/{uuid.uuid4()}/messages")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Expired session
+# ---------------------------------------------------------------------------
+
+
+async def _backdate_session(
+    session_id: str, *, days: int = 0, hours: int = 0
+) -> None:
+    """Set last_activity_at into the past, directly in the DB."""
+    factory = get_session_factory()
+    async with factory() as db:
+        await db.execute(
+            update(Session)
+            .where(Session.id == uuid.UUID(session_id))
+            .values(
+                last_activity_at=datetime.now(UTC) - timedelta(days=days, hours=hours)
+            )
+        )
+        await db.commit()
+
+
+async def test_chat_expired_session_returns_410(client: httpx.AsyncClient) -> None:
+    sid = await _create_session(client)
+    await _backdate_session(sid, days=2)
+    response = await client.post(
+        "/chat", json={"question": "Hello", "session_id": sid}
+    )
+    assert response.status_code == 410
+    assert response.json()["error"]["code"] == "SESSION_EXPIRED"

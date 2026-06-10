@@ -14,7 +14,7 @@ cp .env.example .env                        # then set OPENAI_API_KEY (ANTHROPIC
 docker compose up -d                        # start Postgres 16 + pgvector on :5432
 
 uv run fastapi dev app/main.py              # run API on :8000 (tables auto-create on startup)
-uv run python scripts/ingest_documents.py   # bulk-load data/documents.jsonl via POST /documents/bulk (server must be up)
+uv run python scripts/reset_db.py            # DESTRUCTIVE: drop + recreate all tables (schema cutover)
 uv run streamlit run scripts/streamlit_app.py  # chat UI that visualises the agent flow
 uv run python scripts/chat.py               # CLI chat client
 
