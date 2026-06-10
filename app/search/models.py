@@ -13,8 +13,6 @@ class SearchChunk(SQLModel):
 
 class SearchResult(SQLModel):
     document_id: uuid.UUID
-    title: str
-    subject: str
-    level: str
+    filename: str
     score: float
     chunks: list[SearchChunk]

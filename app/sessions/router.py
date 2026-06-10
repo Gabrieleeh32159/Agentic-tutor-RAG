@@ -5,8 +5,10 @@ import uuid
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.documents.models import DocumentResponse
+from app.documents.service import list_documents
 from app.sessions import service
-from app.sessions.models import SessionResponse
+from app.sessions.models import SessionDetailResponse, SessionResponse
 from app.shared.database import get_session
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -18,14 +20,24 @@ async def create_session(db: AsyncSession = Depends(get_session)) -> SessionResp
     return SessionResponse.model_validate(session, from_attributes=True)
 
 
-@router.get("/{session_id}", response_model=SessionResponse)
+@router.get("/{session_id}", response_model=SessionDetailResponse)
 async def get_session_detail(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
-) -> SessionResponse:
+) -> SessionDetailResponse:
     session = await service.get_active_session(db, session_id)
     await service.touch_session(db, session)
-    return SessionResponse.model_validate(session, from_attributes=True)
+    documents = await list_documents(db, session_id)
+    return SessionDetailResponse(
+        id=session.id,
+        title=session.title,
+        created_at=session.created_at,
+        last_activity_at=session.last_activity_at,
+        documents=[
+            DocumentResponse.model_validate(d, from_attributes=True)
+            for d in documents
+        ],
+    )
 
 
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

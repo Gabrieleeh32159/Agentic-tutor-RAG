@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     SESSION_TTL_HOURS: int = 24
 
+    MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024  # 10 MB
+
     APP_ENV: str = "local"
     LOG_LEVEL: str = "INFO"
 

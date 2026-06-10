@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, Text
 from sqlmodel import Field, SQLModel
 
+from app.documents.models import DocumentResponse
+
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
@@ -32,3 +34,7 @@ class SessionResponse(BaseModel):
     title: str | None
     created_at: datetime
     last_activity_at: datetime
+
+
+class SessionDetailResponse(SessionResponse):
+    documents: list[DocumentResponse] = []

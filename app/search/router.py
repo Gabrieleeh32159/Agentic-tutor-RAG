@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+import uuid
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,15 +15,13 @@ router = APIRouter(prefix="/search", tags=["search"])
 @router.get("", response_model=list[SearchResult])
 async def search(
     q: str = Query(..., min_length=1),
+    session_id: uuid.UUID = Query(...),
     limit: int = Query(5, ge=1, le=20),
-    subject: str | None = Query(None),
-    level: Literal["introductory", "intermediate", "advanced"] | None = Query(None),
     session: AsyncSession = Depends(get_session),
 ) -> list[SearchResult]:
     return await search_documents(
         session=session,
         query=q,
+        session_id=session_id,
         limit=limit,
-        subject=subject,
-        level=level,
     )

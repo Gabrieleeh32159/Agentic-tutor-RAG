@@ -1,114 +1,118 @@
 from __future__ import annotations
 
+import logging
+import uuid
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.documents.models import Document, DocumentChunk, DocumentCreate
+from app.documents.models import Document, DocumentChunk, DocumentStatus
 from app.shared.embeddings import get_embedding_provider
+from app.shared.errors import DocumentNotFoundError
+
+logger = logging.getLogger(__name__)
 
 _splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", r"(?<=\. )"],
     is_separator_regex=True,
     chunk_size=300,
-    chunk_overlap=50
+    chunk_overlap=50,
 )
 
 
-def _build_enriched_text(
-    title: str, subject: str, level: str, chunk: str
-) -> str:
-    return (
-        f"Title: {title}\n"
-        f"Subject: {subject} | Level: {level}\n"
-        f"Content: {chunk}"
-    )
+def build_enriched_text(filename: str, chunk: str, page_number: int | None = None) -> str:
+    """Text that actually gets embedded: file context + chunk content."""
+    location = f" | Page: {page_number}" if page_number is not None else ""
+    return f"File: {filename}{location}\nContent: {chunk}"
 
 
-async def create_document(
-    session: AsyncSession, data: DocumentCreate
+async def create_pending_document(
+    db: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    filename: str,
+    mime_type: str,
+    size_bytes: int,
 ) -> Document:
-    provider = get_embedding_provider()
-
-    chunks = _splitter.split_text(data.content)
-    enriched_texts = [
-        _build_enriched_text(data.title, data.subject, data.level, chunk)
-        for chunk in chunks
-    ]
-    embeddings = await provider.embed_batch(enriched_texts)
-
     document = Document(
-        title=data.title,
-        content=data.content,
-        subject=data.subject,
-        level=data.level,
-        chunk_count=len(chunks),
+        session_id=session_id,
+        filename=filename,
+        mime_type=mime_type,
+        size_bytes=size_bytes,
+        status=DocumentStatus.PENDING,
     )
-    session.add(document)
-    await session.flush()
-
-    chunk_models = [
-        DocumentChunk(
-            document_id=document.id,
-            chunk_text=chunk,
-            embedding=embedding,
-        )
-        for chunk, embedding in zip(chunks, embeddings, strict=False)
-    ]
-    session.add_all(chunk_models)
-
-    await session.commit()
-    await session.refresh(document)
+    db.add(document)
+    await db.commit()
+    await db.refresh(document)
     return document
 
 
-async def bulk_create_documents(
-    session: AsyncSession, items: list[DocumentCreate]
-) -> list[Document]:
-    if not items:
-        return []
+async def process_text_document(
+    db: AsyncSession, document: Document, text: str
+) -> Document:
+    """Chunk, embed and persist extracted text. Marks the document ready or failed.
 
-    provider = get_embedding_provider()
+    Phase 2 replaces the caller with an async background task; the status
+    transitions here are already the final contract.
+    """
+    try:
+        document.status = DocumentStatus.PROCESSING
+        document.stage = "embedding"
+        db.add(document)
+        await db.commit()
 
-    all_chunks: list[tuple[int, str]] = []  # (doc_index, chunk_text)
-    all_enriched: list[str] = []
-    chunk_counts: list[int] = []
-    for i, item in enumerate(items):
-        chunks = _splitter.split_text(item.content)
-        chunk_counts.append(len(chunks))
-        for chunk in chunks:
-            all_chunks.append((i, chunk))
-            all_enriched.append(
-                _build_enriched_text(item.title, item.subject, item.level, chunk)
-            )
+        chunks = _splitter.split_text(text)
+        enriched = [build_enriched_text(document.filename, c) for c in chunks]
+        provider = get_embedding_provider()
+        embeddings = await provider.embed_batch(enriched) if enriched else []
 
-    embeddings = await provider.embed_batch(all_enriched) if all_enriched else []
-
-    documents: list[Document] = []
-    for item, count in zip(items, chunk_counts, strict=False):
-        doc = Document(
-            title=item.title,
-            content=item.content,
-            subject=item.subject,
-            level=item.level,
-            chunk_count=count,
+        db.add_all(
+            [
+                DocumentChunk(
+                    document_id=document.id,
+                    chunk_index=i,
+                    chunk_text=chunk,
+                    embedding=embedding,
+                )
+                for i, (chunk, embedding) in enumerate(
+                    zip(chunks, embeddings, strict=True)
+                )
+            ]
         )
-        session.add(doc)
-        documents.append(doc)
-    await session.flush()
+        document.chunk_count = len(chunks)
+        document.status = DocumentStatus.READY
+        document.stage = None
+        document.progress = 100
+        db.add(document)
+        await db.commit()
+    except Exception:
+        logger.exception("Failed to process document %s", document.id)
+        await db.rollback()
+        document.status = DocumentStatus.FAILED
+        document.stage = None
+        document.error_code = "processing_failed"
+        document.error_message = "Failed to process the document."
+        db.add(document)
+        await db.commit()
+    await db.refresh(document)
+    return document
 
-    chunk_models: list[DocumentChunk] = []
-    for (doc_idx, chunk_text), embedding in zip(all_chunks, embeddings, strict=False):
-        chunk_models.append(
-            DocumentChunk(
-                document_id=documents[doc_idx].id,
-                chunk_text=chunk_text,
-                embedding=embedding,
-            )
-        )
-    session.add_all(chunk_models)
 
-    await session.commit()
-    for doc in documents:
-        await session.refresh(doc)
+async def list_documents(db: AsyncSession, session_id: uuid.UUID) -> list[Document]:
+    result = await db.execute(
+        select(Document)
+        .where(Document.session_id == session_id)
+        .order_by(Document.created_at)
+    )
+    return list(result.scalars().all())
 
-    return documents
+
+async def delete_document(
+    db: AsyncSession, session_id: uuid.UUID, document_id: uuid.UUID
+) -> None:
+    document = await db.get(Document, document_id)
+    if document is None or document.session_id != session_id:
+        raise DocumentNotFoundError(f"Document {document_id} not found")
+    await db.delete(document)
+    await db.commit()
