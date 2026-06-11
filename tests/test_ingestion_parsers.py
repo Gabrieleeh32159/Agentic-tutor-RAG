@@ -111,3 +111,50 @@ def test_sniff_accepts_real_fixtures() -> None:
     ]:
         data = (FIXTURES / name).read_bytes()
         assert sniff_matches_extension(data, ext) is True, name
+
+
+# --- Fix 1: sniff gate handles empty / tiny payloads ---
+
+
+def test_sniff_handles_empty_bytes() -> None:
+    assert sniff_matches_extension(b"", ".txt") is True
+    assert sniff_matches_extension(b"", ".pdf") is False
+
+
+def test_sniff_handles_tiny_payload() -> None:
+    assert sniff_matches_extension(b"x", ".txt") is True
+
+
+# --- Fix 2: text parser rejects NUL bytes ---
+
+
+def test_text_parser_rejects_nul_bytes() -> None:
+    parser = get_parser(".txt")
+    with pytest.raises(ParseFailedError):
+        parser.parse(b"\x7fELF" + b"\x00" * 50, "fake.txt")
+
+
+# --- Fix 3: build_enriched_text output format ---
+
+
+def test_build_enriched_text_locations() -> None:
+    from app.ingestion.chunking import build_enriched_text
+
+    assert build_enriched_text("a.pdf", "body", page_number=3) == (
+        "File: a.pdf | Page: 3\nContent: body"
+    )
+    assert build_enriched_text("a.xlsx", "body", sheet_name="Q1") == (
+        "File: a.xlsx | Sheet: Q1\nContent: body"
+    )
+    # Page wins when both present
+    assert "| Page: 2" in build_enriched_text(
+        "a.pdf", "b", page_number=2, sheet_name="X"
+    )
+    assert build_enriched_text("a.txt", "body") == "File: a.txt\nContent: body"
+
+
+# --- Fix 4: registry case-insensitivity ---
+
+
+def test_get_parser_is_case_insensitive() -> None:
+    assert get_parser(".TXT") is not None

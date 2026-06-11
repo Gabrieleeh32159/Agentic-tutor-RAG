@@ -20,6 +20,10 @@ SUPPORTED_TYPES: dict[str, str] = {
 
 # Binary extensions and the signature prefixes puremagic must agree with.
 # txt/md have no signature; they pass unless the bytes match a known binary type.
+#
+# NOTE: signature sniffing is a *plausibility* gate, not validation.
+# Any valid zip container will pass as .docx/.xlsx; the parsers must treat
+# garbage zips as ParseFailedError rather than relying on sniff alone.
 _BINARY_EXT_MATCHES: dict[str, tuple[str, ...]] = {
     ".pdf": (".pdf",),
     ".docx": (".docx", ".zip"),  # OOXML is a zip container
@@ -27,7 +31,7 @@ _BINARY_EXT_MATCHES: dict[str, tuple[str, ...]] = {
     ".png": (".png",),
     ".jpg": (".jpg", ".jpeg", ".jfif"),
     ".jpeg": (".jpg", ".jpeg", ".jfif"),
-    ".webp": (".webp", ".riff"),
+    ".webp": (".webp",),  # .riff dropped: any RIFF container (wav/avi) would also pass
 }
 
 
@@ -52,11 +56,13 @@ def get_parser(extension: str, default: Parser | None = None) -> Parser | None:
 
 
 def _detected_extensions(data: bytes) -> set[str]:
+    if not data:
+        return set()
     try:
         return {
             m.extension.lower() for m in puremagic.magic_string(data) if m.extension
         }
-    except puremagic.PuremagicException:
+    except (puremagic.PureError, ValueError):
         return set()
 
 
