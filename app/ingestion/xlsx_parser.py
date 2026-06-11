@@ -14,7 +14,10 @@ ROWS_PER_BLOCK = 30
 
 
 def _markdown_row(values: tuple) -> str:
-    cells = ["" if v is None else str(v) for v in values]
+    cells = [
+        "" if v is None else str(v).replace("\n", " ").replace("|", "\\|")
+        for v in values
+    ]
     return "| " + " | ".join(cells) + " |"
 
 

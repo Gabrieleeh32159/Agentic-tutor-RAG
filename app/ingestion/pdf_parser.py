@@ -17,7 +17,14 @@ class PdfParser:
         try:
             reader = PdfReader(BytesIO(data))
             if reader.is_encrypted:
-                raise ParseFailedError("Encrypted PDFs are not supported")
+                # Permissions-only encryption (empty user password) is allowed;
+                # hard-encrypted files (user password set) must be rejected.
+                try:
+                    decrypted = reader.decrypt("")
+                except Exception as exc:
+                    raise ParseFailedError("Encrypted PDFs are not supported") from exc
+                if not decrypted:
+                    raise ParseFailedError("Encrypted PDFs are not supported")
             page_count = len(reader.pages)
         except ParseFailedError:
             raise

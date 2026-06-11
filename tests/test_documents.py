@@ -5,6 +5,8 @@ import uuid
 import httpx
 import pytest
 
+from app.ingestion.service import wait_for_ingestion
+
 MD_CONTENT = b"# Calculus Notes\n\nA derivative measures how a function changes as its input changes."
 
 
@@ -16,6 +18,13 @@ async def _create_session(client: httpx.AsyncClient) -> str:
 
 def _upload(name: str, content: bytes, mime: str) -> dict:
     return {"file": (name, content, mime)}
+
+
+async def _await_ready(client: httpx.AsyncClient, sid: str, doc_id: str) -> dict:
+    """Wait for background ingestion then fetch the document by id."""
+    await wait_for_ingestion()
+    docs = (await client.get(f"/sessions/{sid}/documents")).json()
+    return next(d for d in docs if d["id"] == doc_id)
 
 
 async def test_upload_markdown_document(client: httpx.AsyncClient) -> None:
@@ -30,9 +39,12 @@ async def test_upload_markdown_document(client: httpx.AsyncClient) -> None:
     assert data["filename"] == "notes.md"
     assert data["mime_type"] == "text/markdown"
     assert data["size_bytes"] == len(MD_CONTENT)
-    assert data["status"] == "ready"  # Phase 1 processes inline
-    assert data["chunk_count"] >= 1
-    assert data["error_code"] is None
+    assert data["status"] == "pending"  # async: background task processes it
+
+    final = await _await_ready(client, sid, data["id"])
+    assert final["status"] == "ready"
+    assert final["chunk_count"] >= 1
+    assert final["error_code"] is None
 
 
 async def test_upload_txt_document(client: httpx.AsyncClient) -> None:
@@ -42,7 +54,10 @@ async def test_upload_txt_document(client: httpx.AsyncClient) -> None:
         files=_upload("plain.txt", b"Cells contain organelles.", "text/plain"),
     )
     assert response.status_code == 202
-    assert response.json()["status"] == "ready"
+    assert response.json()["status"] == "pending"
+
+    final = await _await_ready(client, sid, response.json()["id"])
+    assert final["status"] == "ready"
 
 
 async def test_upload_unsupported_type_returns_415(client: httpx.AsyncClient) -> None:
@@ -66,14 +81,18 @@ async def test_upload_oversized_file_returns_413(client: httpx.AsyncClient) -> N
     assert response.json()["error"]["code"] == "FILE_TOO_LARGE"
 
 
-async def test_upload_invalid_utf8_returns_422(client: httpx.AsyncClient) -> None:
+async def test_upload_invalid_utf8_fails_async(client: httpx.AsyncClient) -> None:
+    """Invalid UTF-8 text files now fail asynchronously (parse_failed, not 422)."""
     sid = await _create_session(client)
     response = await client.post(
         f"/sessions/{sid}/documents",
         files=_upload("binary.txt", b"\xff\xfe\x00\x01", "text/plain"),
     )
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "PARSE_FAILED"
+    assert response.status_code == 202
+    doc = response.json()
+    final = await _await_ready(client, sid, doc["id"])
+    assert final["status"] == "failed"
+    assert final["error_code"] == "parse_failed"
 
 
 async def test_upload_to_unknown_session_returns_404(client: httpx.AsyncClient) -> None:
@@ -91,6 +110,7 @@ async def test_list_documents(client: httpx.AsyncClient) -> None:
         f"/sessions/{sid}/documents",
         files=_upload("notes.md", MD_CONTENT, "text/markdown"),
     )
+    await wait_for_ingestion()
     response = await client.get(f"/sessions/{sid}/documents")
     assert response.status_code == 200
     docs = response.json()
@@ -105,6 +125,7 @@ async def test_list_documents_is_session_scoped(client: httpx.AsyncClient) -> No
         f"/sessions/{sid_a}/documents",
         files=_upload("notes.md", MD_CONTENT, "text/markdown"),
     )
+    await wait_for_ingestion()
     response = await client.get(f"/sessions/{sid_b}/documents")
     assert response.status_code == 200
     assert response.json() == []
@@ -118,6 +139,7 @@ async def test_delete_document(client: httpx.AsyncClient) -> None:
             files=_upload("notes.md", MD_CONTENT, "text/markdown"),
         )
     ).json()
+    await wait_for_ingestion()
 
     response = await client.delete(f"/sessions/{sid}/documents/{doc['id']}")
     assert response.status_code == 204
@@ -137,6 +159,7 @@ async def test_delete_document_wrong_session_returns_404(
             files=_upload("notes.md", MD_CONTENT, "text/markdown"),
         )
     ).json()
+    await wait_for_ingestion()
 
     response = await client.delete(f"/sessions/{sid_b}/documents/{doc['id']}")
     assert response.status_code == 404
@@ -149,6 +172,7 @@ async def test_session_detail_includes_documents(client: httpx.AsyncClient) -> N
         f"/sessions/{sid}/documents",
         files=_upload("notes.md", MD_CONTENT, "text/markdown"),
     )
+    await wait_for_ingestion()
     response = await client.get(f"/sessions/{sid}")
     assert response.status_code == 200
     data = response.json()
@@ -156,14 +180,18 @@ async def test_session_detail_includes_documents(client: httpx.AsyncClient) -> N
     assert data["documents"][0]["filename"] == "notes.md"
 
 
-async def test_upload_empty_file_returns_422(client: httpx.AsyncClient) -> None:
+async def test_upload_empty_file_fails_async(client: httpx.AsyncClient) -> None:
+    """Empty/whitespace files now fail asynchronously (parse_failed, not 422)."""
     sid = await _create_session(client)
     response = await client.post(
         f"/sessions/{sid}/documents",
         files=_upload("empty.txt", b"   \n", "text/plain"),
     )
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "PARSE_FAILED"
+    assert response.status_code == 202
+    doc = response.json()
+    final = await _await_ready(client, sid, doc["id"])
+    assert final["status"] == "failed"
+    assert final["error_code"] == "parse_failed"
 
 
 async def test_processing_failure_marks_document_failed(
@@ -187,11 +215,14 @@ async def test_processing_failure_marks_document_failed(
         files=_upload("notes.md", MD_CONTENT, "text/markdown"),
     )
     assert response.status_code == 202
-    data = response.json()
-    assert data["status"] == "failed"
-    assert data["error_code"] == "processing_failed"
-    assert data["error_message"]
-    assert data["chunk_count"] == 0
+    doc = response.json()
+
+    await wait_for_ingestion()
+    final = await _await_ready(client, sid, doc["id"])
+    assert final["status"] == "failed"
+    assert final["error_code"] == "processing_failed"
+    assert final["error_message"]
+    assert final["chunk_count"] == 0
 
 
 async def test_search_excludes_failed_documents(
@@ -215,6 +246,7 @@ async def test_search_excludes_failed_documents(
         f"/sessions/{sid}/documents",
         files=_upload("broken.md", MD_CONTENT, "text/markdown"),
     )
+    await wait_for_ingestion()
     monkeypatch.setattr(embeddings_module, "_provider", saved)
 
     response = await client.get(

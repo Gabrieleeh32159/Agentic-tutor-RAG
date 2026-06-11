@@ -52,6 +52,11 @@ class ParseFailedError(AppError):
     status_code = 422
 
 
+class SessionLimitExceededError(AppError):
+    code = "SESSION_DOCUMENT_LIMIT"
+    status_code = 409
+
+
 class GuardrailBlockedError(AppError):
     code = "GUARDRAIL_BLOCKED"
     status_code = 400

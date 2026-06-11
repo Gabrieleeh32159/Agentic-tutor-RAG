@@ -295,7 +295,7 @@ def test_xlsx_zip_bomb_guard(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- image parser (vision is faked by the autouse conftest fixture) ---
 
 
-async def test_image_parser_uses_vision() -> None:
+def test_image_parser_defers_to_ocr() -> None:
     parser = get_parser(".png")
     data = (FIXTURES / "sample.png").read_bytes()
     parsed = parser.parse(data, "sample.png")

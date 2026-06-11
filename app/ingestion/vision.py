@@ -18,15 +18,15 @@ VISION_PROMPT = (
 )
 
 
-async def extract_text_from_image(png_bytes: bytes) -> str:
+async def extract_text_from_image(image_bytes: bytes, mime: str = "image/png") -> str:
     """OCR a single page/image via the vision LLM. Returns extracted text."""
-    encoded = base64.b64encode(png_bytes).decode()
+    encoded = base64.b64encode(image_bytes).decode()
     message = HumanMessage(
         content=[
             {"type": "text", "text": VISION_PROMPT},
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                "image_url": {"url": f"data:{mime};base64,{encoded}"},
             },
         ]
     )

@@ -264,7 +264,7 @@ def mock_vision(monkeypatch: pytest.MonkeyPatch):
     """
     import app.ingestion.vision as vision_module
 
-    async def _fake_extract(png_bytes: bytes) -> str:
+    async def _fake_extract(image_bytes: bytes, mime: str = "image/png") -> str:
         return FAKE_VISION_TEXT
 
     def _fake_rasterize(pdf_bytes: bytes, page_index: int, scale: float = 2.0) -> bytes:

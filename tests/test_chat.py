@@ -8,6 +8,7 @@ import httpx
 import pytest
 from sqlalchemy import update
 
+from app.ingestion.service import wait_for_ingestion
 from app.sessions.models import Session
 from app.shared.database import get_session_factory
 
@@ -31,6 +32,7 @@ async def chat_session(client: httpx.AsyncClient) -> tuple[httpx.AsyncClient, st
             files={"file": (name, content, "text/markdown")},
         )
         assert response.status_code == 202
+    await wait_for_ingestion()
     return client, sid
 
 

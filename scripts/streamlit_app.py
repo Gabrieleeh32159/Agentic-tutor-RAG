@@ -41,7 +41,8 @@ with st.sidebar:
         st.caption(f"Session: `{session_id}`")
 
         uploaded = st.file_uploader(
-            "Upload a document (.txt / .md)", type=["txt", "md"]
+            "Upload a document",
+            type=["txt", "md", "pdf", "docx", "xlsx", "png", "jpg", "jpeg", "webp"],
         )
         if uploaded is not None and st.button("Ingest file"):
             resp = httpx.post(
@@ -56,6 +57,8 @@ with st.sidebar:
 
         st.divider()
         st.subheader("Documents")
+        if st.button("🔄 Refresh"):
+            st.rerun()
         try:
             docs = httpx.get(
                 f"{API_URL}/sessions/{session_id}/documents", timeout=10.0

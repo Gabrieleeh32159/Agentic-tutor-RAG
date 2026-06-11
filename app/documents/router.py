@@ -7,25 +7,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.documents.models import DocumentResponse
 from app.documents.service import (
+    count_documents,
     create_pending_document,
     delete_document,
     list_documents,
-    process_text_document,
 )
+from app.ingestion.registry import SUPPORTED_TYPES, sniff_matches_extension
+from app.ingestion.service import schedule_processing
 from app.sessions.service import get_active_session, touch_session
 from app.shared.config import get_settings
 from app.shared.database import get_session
 from app.shared.errors import (
     FileTooLargeError,
-    ParseFailedError,
+    SessionLimitExceededError,
     UnsupportedFileTypeError,
 )
 
 router = APIRouter(prefix="/sessions/{session_id}/documents", tags=["documents"])
-
-# Phase 1 supports plain-text formats only; Phase 2 adds the parser registry
-# (pdf/docx/xlsx/images) behind the same endpoint.
-TEXT_EXTENSIONS = {".txt": "text/plain", ".md": "text/markdown"}
 
 
 def _extension(filename: str) -> str:
@@ -40,40 +38,41 @@ async def upload_document(
     db: AsyncSession = Depends(get_session),
 ) -> DocumentResponse:
     session = await get_active_session(db, session_id)
+    settings = get_settings()
+
+    # Validation order: session → doc-count cap → extension → bounded read → size → sniff
+    if await count_documents(db, session_id) >= settings.MAX_DOCS_PER_SESSION:
+        raise SessionLimitExceededError(
+            f"This session already has {settings.MAX_DOCS_PER_SESSION} documents"
+        )
 
     filename = file.filename or "upload"
     ext = _extension(filename)
-    if ext not in TEXT_EXTENSIONS:
-        supported = ", ".join(sorted(TEXT_EXTENSIONS))
+    if ext not in SUPPORTED_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_TYPES))
         raise UnsupportedFileTypeError(
             f"Unsupported file type '{ext or filename}'. Supported: {supported}"
         )
 
-    settings = get_settings()
     data = await file.read(settings.MAX_UPLOAD_BYTES + 1)
     if len(data) > settings.MAX_UPLOAD_BYTES:
         limit_mb = settings.MAX_UPLOAD_BYTES // (1024 * 1024)
         raise FileTooLargeError(f"File exceeds the {limit_mb} MB limit")
 
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ParseFailedError("File is not valid UTF-8 text") from exc
-
-    if not text.strip():
-        raise ParseFailedError("File contains no text")
+    if not sniff_matches_extension(data, ext):
+        raise UnsupportedFileTypeError(
+            f"File content does not match the '{ext}' extension"
+        )
 
     document = await create_pending_document(
         db,
         session_id=session_id,
         filename=filename,
-        mime_type=TEXT_EXTENSIONS[ext],
+        mime_type=SUPPORTED_TYPES[ext],
         size_bytes=len(data),
     )
-    # Phase 1 processes inline; Phase 2 moves this into a background task,
-    # which is why the endpoint already returns 202 + status fields.
-    document = await process_text_document(db, document, text)
     await touch_session(db, session)
+    schedule_processing(document.id, data, ext)
     return DocumentResponse.model_validate(document, from_attributes=True)
 
 

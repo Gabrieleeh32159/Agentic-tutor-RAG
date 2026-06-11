@@ -10,7 +10,13 @@ from app.shared.errors import ParseFailedError
 
 
 def _table_to_markdown(table) -> str:
-    rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+    rows = [
+        [
+            str(cell.text).replace("\n", " ").replace("|", "\\|").strip()
+            for cell in row.cells
+        ]
+        for row in table.rows
+    ]
     if not rows:
         return ""
     lines = ["| " + " | ".join(rows[0]) + " |"]

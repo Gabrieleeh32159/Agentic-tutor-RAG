@@ -5,6 +5,8 @@ import uuid
 import httpx
 import pytest
 
+from app.ingestion.service import wait_for_ingestion
+
 
 async def _create_session(client: httpx.AsyncClient) -> str:
     response = await client.post("/sessions")
@@ -18,7 +20,7 @@ async def _upload_md(client: httpx.AsyncClient, sid: str, name: str, text: str) 
         files={"file": (name, text.encode(), "text/markdown")},
     )
     assert response.status_code == 202
-    assert response.json()["status"] == "ready"
+    await wait_for_ingestion()
 
 
 @pytest.fixture

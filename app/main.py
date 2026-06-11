@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import update
 from sqlmodel import SQLModel
 
 from app.chat.models import ChatMessage  # noqa: F401
-from app.documents.models import Document, DocumentChunk  # noqa: F401
+from app.documents.models import Document, DocumentChunk, DocumentStatus  # noqa: F401
 from app.sessions.models import Session  # noqa: F401
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
@@ -24,6 +25,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     async with get_engine().begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+
+    # Startup reconciliation: mark rows orphaned by a previous restart as failed.
+    # Any document still in pending/processing state when the server comes up
+    # was left mid-flight by a crash — it will never complete, so surface it as
+    # failed/interrupted so clients aren't stuck polling forever.
+    async with get_engine().begin() as conn:
+        await conn.execute(
+            update(Document)
+            .where(
+                Document.status.in_([DocumentStatus.PENDING, DocumentStatus.PROCESSING])
+            )
+            .values(
+                status=DocumentStatus.FAILED,
+                stage=None,
+                error_code="interrupted",
+                error_message="Processing was interrupted by a server restart.",
+            )
+        )
 
     try:
         yield
