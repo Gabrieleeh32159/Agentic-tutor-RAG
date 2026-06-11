@@ -158,3 +158,148 @@ def test_build_enriched_text_locations() -> None:
 
 def test_get_parser_is_case_insensitive() -> None:
     assert get_parser(".TXT") is not None
+
+
+# --- pdf parser ---
+
+
+def test_pdf_parser_extracts_text_per_page() -> None:
+    parser = get_parser(".pdf")
+    data = (FIXTURES / "sample.pdf").read_bytes()
+    parsed = parser.parse(data, "sample.pdf")
+    assert parsed.page_count == 2
+    assert parsed.needs_ocr_pages == []
+    page1 = next(b for b in parsed.blocks if b.page_number == 1)
+    assert "Photosynthesis" in page1.text
+
+
+def test_pdf_parser_flags_scanned_pages_for_ocr() -> None:
+    parser = get_parser(".pdf")
+    data = (FIXTURES / "scanned.pdf").read_bytes()
+    parsed = parser.parse(data, "scanned.pdf")
+    assert parsed.page_count == 2
+    assert parsed.needs_ocr_pages == [1, 2]
+    assert parsed.blocks == []
+
+
+def test_pdf_parser_rejects_over_page_limit() -> None:
+    from io import BytesIO
+
+    from pypdf import PdfWriter
+
+    from app.shared.errors import PageLimitExceededError
+
+    writer = PdfWriter()
+    for _ in range(51):
+        writer.add_blank_page(width=200, height=200)
+    buf = BytesIO()
+    writer.write(buf)
+
+    parser = get_parser(".pdf")
+    with pytest.raises(PageLimitExceededError):
+        parser.parse(buf.getvalue(), "big.pdf")
+
+
+def test_pdf_parser_rejects_corrupt_file() -> None:
+    parser = get_parser(".pdf")
+    with pytest.raises(ParseFailedError):
+        parser.parse(b"%PDF-1.4 garbage not a real pdf", "corrupt.pdf")
+
+
+# --- docx parser ---
+
+
+def test_docx_parser_extracts_paragraphs_and_tables() -> None:
+    parser = get_parser(".docx")
+    data = (FIXTURES / "sample.docx").read_bytes()
+    parsed = parser.parse(data, "sample.docx")
+    text = "\n".join(b.text for b in parsed.blocks)
+    assert "powerhouse of the cell" in text
+    assert "| Organelle | Function |" in text  # tables come out as markdown
+    assert "Ribosome" in text
+
+
+def test_docx_parser_rejects_corrupt_file() -> None:
+    parser = get_parser(".docx")
+    with pytest.raises(ParseFailedError):
+        parser.parse(b"not a zip at all", "corrupt.docx")
+
+
+# --- docx zip-bomb guard ---
+
+
+def test_docx_zip_bomb_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.ingestion import office
+
+    data = (FIXTURES / "sample.docx").read_bytes()
+    monkeypatch.setattr(office, "MAX_DECOMPRESSED_BYTES", 10)
+    with pytest.raises(ParseFailedError, match="decompresses too large"):
+        office.check_zip_bomb(data)
+
+
+# --- xlsx parser ---
+
+
+def test_xlsx_parser_emits_markdown_tables_with_header() -> None:
+    parser = get_parser(".xlsx")
+    data = (FIXTURES / "sample.xlsx").read_bytes()
+    parsed = parser.parse(data, "sample.xlsx")
+    assert len(parsed.blocks) == 1
+    block = parsed.blocks[0]
+    assert block.is_atomic is True
+    assert block.sheet_name == "Grades"
+    assert "| Student | Subject | Grade |" in block.text
+    assert "| Ana | Math | 95 |" in block.text
+
+
+def test_xlsx_parser_repeats_header_across_row_chunks() -> None:
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Big"
+    ws.append(["id", "value"])
+    for i in range(75):  # 75 data rows -> 3 blocks at 30 rows each
+        ws.append([i, f"v{i}"])
+    buf = BytesIO()
+    wb.save(buf)
+
+    parser = get_parser(".xlsx")
+    parsed = parser.parse(buf.getvalue(), "big.xlsx")
+    assert len(parsed.blocks) == 3
+    for block in parsed.blocks:
+        assert block.text.startswith("| id | value |")
+        assert block.is_atomic is True
+
+
+def test_xlsx_parser_rejects_corrupt_file() -> None:
+    parser = get_parser(".xlsx")
+    with pytest.raises(ParseFailedError):
+        parser.parse(b"definitely not xlsx", "corrupt.xlsx")
+
+
+# --- xlsx zip-bomb guard ---
+
+
+def test_xlsx_zip_bomb_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.ingestion import office
+
+    data = (FIXTURES / "sample.xlsx").read_bytes()
+    monkeypatch.setattr(office, "MAX_DECOMPRESSED_BYTES", 10)
+    with pytest.raises(ParseFailedError, match="decompresses too large"):
+        office.check_zip_bomb(data)
+
+
+# --- image parser (vision is faked by the autouse conftest fixture) ---
+
+
+async def test_image_parser_uses_vision() -> None:
+    parser = get_parser(".png")
+    data = (FIXTURES / "sample.png").read_bytes()
+    parsed = parser.parse(data, "sample.png")
+    # Image parsing defers extraction: it flags a single pseudo-page for OCR
+    assert parsed.page_count == 1
+    assert parsed.needs_ocr_pages == [1]
+    assert parsed.blocks == []

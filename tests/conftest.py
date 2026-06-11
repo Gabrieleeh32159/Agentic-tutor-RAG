@@ -250,3 +250,26 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+FAKE_VISION_TEXT = "Scanned page about photosynthesis and chlorophyll absorption."
+
+
+@pytest.fixture(autouse=True)
+def mock_vision(monkeypatch: pytest.MonkeyPatch):
+    """Replace vision OCR with a canned transcription (no network).
+
+    Yields the canned text so tests can assert against it without importing
+    from conftest (tests/ is not a package).
+    """
+    import app.ingestion.vision as vision_module
+
+    async def _fake_extract(png_bytes: bytes) -> str:
+        return FAKE_VISION_TEXT
+
+    def _fake_rasterize(pdf_bytes: bytes, page_index: int, scale: float = 2.0) -> bytes:
+        return b"fake-png"
+
+    monkeypatch.setattr(vision_module, "extract_text_from_image", _fake_extract)
+    monkeypatch.setattr(vision_module, "rasterize_pdf_page", _fake_rasterize)
+    yield FAKE_VISION_TEXT

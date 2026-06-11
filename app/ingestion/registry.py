@@ -36,12 +36,24 @@ _BINARY_EXT_MATCHES: dict[str, tuple[str, ...]] = {
 
 
 def _build_parsers() -> dict[str, Parser]:
-    # NOTE (Task 2): only the text parser exists yet. Task 3 Step 8b extends this
-    # with PdfParser/DocxParser/XlsxParser/ImageParser once those modules exist.
+    # Imported here (not module top) so importing the registry stays cheap.
+    from app.ingestion.docx_parser import DocxParser
+    from app.ingestion.image_parser import ImageParser
+    from app.ingestion.pdf_parser import PdfParser
+    from app.ingestion.xlsx_parser import XlsxParser
+
     text = TextParser()
+    image = ImageParser()
     return {
         ".txt": text,
         ".md": text,
+        ".pdf": PdfParser(),
+        ".docx": DocxParser(),
+        ".xlsx": XlsxParser(),
+        ".png": image,
+        ".jpg": image,
+        ".jpeg": image,
+        ".webp": image,
     }
 
 

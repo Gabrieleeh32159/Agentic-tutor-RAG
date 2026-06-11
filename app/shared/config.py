@@ -29,6 +29,13 @@ class Settings(BaseSettings):
 
     MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
+    VISION_MODEL: str = "gpt-4o-mini"
+
+    MAX_PDF_PAGES: int = 50
+    MAX_OCR_PAGES_PER_DOC: int = 20
+    MAX_DOCS_PER_SESSION: int = 20
+    MAX_CHUNKS_PER_DOC: int = 500
+
     APP_ENV: str = "local"
     LOG_LEVEL: str = "INFO"
 

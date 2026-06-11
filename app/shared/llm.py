@@ -11,6 +11,20 @@ logger = logging.getLogger(__name__)
 
 
 _chat_model: BaseChatModel | None = None
+_vision_model: BaseChatModel | None = None
+
+
+def get_vision_model() -> BaseChatModel:
+    """Multimodal model used for OCR of scanned pages and images."""
+    global _vision_model
+    if _vision_model is None:
+        settings = get_settings()
+        _vision_model = ChatOpenAI(
+            model=settings.VISION_MODEL,
+            api_key=settings.OPENAI_API_KEY,
+            temperature=0,
+        )
+    return _vision_model
 
 
 def get_chat_model() -> BaseChatModel:
