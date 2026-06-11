@@ -28,11 +28,12 @@ async def main() -> None:
     settings = get_settings()
     init_engine(settings.DATABASE_URL)
     async with get_engine().begin() as conn:
-        # Proactively drop legacy tables (chat_sessions, old chat_messages FK)
-        # so this script works on both old-schema and current-schema databases.
+        # Legacy tables (chat_sessions, the old chat_messages FK) are no longer
+        # in metadata, so drop_all alone can't remove them on an old database.
         await conn.exec_driver_sql(
-            "DROP TABLE IF EXISTS chat_messages, chat_sessions, document_chunks, documents, sessions CASCADE"
+            "DROP TABLE IF EXISTS chat_messages, chat_sessions CASCADE"
         )
+        await conn.run_sync(SQLModel.metadata.drop_all)
         await conn.run_sync(SQLModel.metadata.create_all)
     await close_engine()
     print("Database schema reset.")
