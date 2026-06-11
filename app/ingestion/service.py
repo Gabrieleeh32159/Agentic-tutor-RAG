@@ -116,10 +116,12 @@ async def process_document(document_id: uuid.UUID, data: bytes, extension: str) 
                                 vision.rasterize_pdf_page, data, page_number - 1
                             )
                             image_mime = "image/png"
-                        text = await vision.extract_text_from_image(
-                            image_bytes, mime=image_mime
+                        text = vision.clean_transcription(
+                            await vision.extract_text_from_image(
+                                image_bytes, mime=image_mime
+                            )
                         )
-                        if text.strip():
+                        if text:
                             # OCR output joins the regular blocks with its page number
                             parsed.blocks.append(
                                 ParsedBlock(text=text, page_number=page_number)

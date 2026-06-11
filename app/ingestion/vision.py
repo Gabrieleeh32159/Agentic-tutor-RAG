@@ -14,8 +14,30 @@ VISION_PROMPT = (
     "Transcribe ALL text visible in this document page image, verbatim. "
     "Preserve the reading order and structure using markdown (headings, lists, "
     "tables). If the page contains charts or figures, describe them briefly in "
-    "[brackets]. Return ONLY the transcription, no commentary."
+    "[brackets]. Return ONLY the transcription, no commentary. "
+    "If the page contains no readable text at all, respond with exactly NO_TEXT."
 )
+
+_NON_TRANSCRIPTIONS = (
+    "no_text",
+    "i'm sorry",
+    "i am sorry",
+    "i can't",
+    "i cannot",
+)
+
+
+def clean_transcription(text: str) -> str:
+    """Return the transcription, or '' when the model produced no usable text.
+
+    Vision models answer NO_TEXT per the prompt contract for blank pages, but
+    may also refuse outright; either way the output must not enter the index.
+    """
+    stripped = text.strip()
+    normalized = stripped.strip("[]() ").lower()
+    if normalized.startswith(_NON_TRANSCRIPTIONS):
+        return ""
+    return stripped
 
 
 async def extract_text_from_image(image_bytes: bytes, mime: str = "image/png") -> str:

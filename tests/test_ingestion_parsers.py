@@ -303,3 +303,21 @@ def test_image_parser_defers_to_ocr() -> None:
     assert parsed.page_count == 1
     assert parsed.needs_ocr_pages == [1]
     assert parsed.blocks == []
+
+
+# --- clean_transcription filter ---
+
+
+def test_clean_transcription_filters_refusals_and_no_text() -> None:
+    from app.ingestion.vision import clean_transcription
+
+    assert clean_transcription("NO_TEXT") == ""
+    assert clean_transcription("  [NO_TEXT]  ") == ""
+    assert clean_transcription("I'm sorry, but I can't assist with that.") == ""
+    assert clean_transcription("I cannot transcribe this image.") == ""
+    assert (
+        clean_transcription("# Real Heading\nActual content.")
+        == "# Real Heading\nActual content."
+    )
+    # A legitimate transcription that merely CONTAINS an apology mid-text survives
+    assert clean_transcription("The author wrote: i'm sorry for the delay.") != ""

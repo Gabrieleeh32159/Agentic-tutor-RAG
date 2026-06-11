@@ -296,6 +296,35 @@ async def test_delete_document_during_processing(client: httpx.AsyncClient) -> N
     assert count == 0
 
 
+async def test_vision_refusal_does_not_pollute_index(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scanned doc whose every page yields a refusal must fail, not index garbage."""
+    import app.ingestion.vision as vision_module
+
+    async def _refuse(image_bytes: bytes, mime: str = "image/png") -> str:
+        return "I'm sorry, but I can't assist with that."
+
+    monkeypatch.setattr(vision_module, "extract_text_from_image", _refuse)
+
+    sid = await _create_session(client)
+    data = (FIXTURES / "scanned.pdf").read_bytes()
+    response = await client.post(
+        f"/sessions/{sid}/documents",
+        files={"file": ("scanned.pdf", data, "application/pdf")},
+    )
+    assert response.status_code == 202
+    doc = response.json()
+    await wait_for_ingestion()
+
+    final = await _get_doc(client, sid, doc["id"])
+    assert final["status"] == "failed"
+    assert final["error_code"] == "parse_failed"
+
+    search = await client.get("/search", params={"q": "sorry", "session_id": sid})
+    assert search.json() == []
+
+
 async def test_hard_encrypted_pdf_fails_async(client: httpx.AsyncClient) -> None:
     """A PDF encrypted with a user password must fail with parse_failed."""
     from io import BytesIO
