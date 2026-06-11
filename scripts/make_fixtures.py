@@ -93,8 +93,12 @@ def main() -> None:
     )
     # Sanity: every fixture exists and is non-empty
     for name in [
-        "sample.pdf", "scanned.pdf", "sample.docx",
-        "sample.xlsx", "sample.png", "sample.txt",
+        "sample.pdf",
+        "scanned.pdf",
+        "sample.docx",
+        "sample.xlsx",
+        "sample.png",
+        "sample.txt",
     ]:
         path = FIXTURES / name
         assert path.stat().st_size > 0, name
