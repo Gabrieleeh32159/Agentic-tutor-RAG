@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **⚠️ IN-FLIGHT REWRITE (branch `feature/ask-your-pdfs`):** this project is being transformed into a session-scoped "Ask your PDFs" app. The API is now `POST /sessions` → multipart `POST /sessions/{id}/documents` (pdf/docx/xlsx/images/txt/md, async ingestion with status polling) → `GET /search?q=&session_id=` → `POST /chat {question, session_id}`. `subject`/`level`, `POST /documents(/bulk)`, and `ChatSession` no longer exist. Authoritative design: `docs/superpowers/specs/2026-06-10-ask-your-pdfs-design.md`. The architecture sections below describe the OLD system and will be rewritten in Phase 7 — trust the spec and the code over them.
+
 ## What this is
 
 A FastAPI async service for educational-content Retrieval-Augmented Generation (a take-home challenge). It ingests documents, indexes them with OpenAI embeddings in pgvector, and answers student questions via an agentic RAG loop with streaming. Steps 1–3 of the challenge are implemented (ingestion, semantic search, RAG chat); Step 4 (flashcard generation) is **not** implemented.
