@@ -84,9 +84,7 @@ async def get_documents(
 ) -> list[DocumentResponse]:
     await get_active_session(db, session_id)
     documents = await list_documents(db, session_id)
-    return [
-        DocumentResponse.model_validate(d, from_attributes=True) for d in documents
-    ]
+    return [DocumentResponse.model_validate(d, from_attributes=True) for d in documents]
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)

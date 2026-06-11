@@ -27,7 +27,8 @@ async def test_app_error_returns_structured_envelope(client: httpx.AsyncClient) 
         response = await client.get("/_test/raise-app-error")
     finally:
         app.router.routes = [
-            r for r in app.router.routes
+            r
+            for r in app.router.routes
             if getattr(r, "path", "") != "/_test/raise-app-error"
         ]
 

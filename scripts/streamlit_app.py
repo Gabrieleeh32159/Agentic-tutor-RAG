@@ -126,8 +126,9 @@ if question := st.chat_input("Ask about your documents…"):
 
                         if "sources" in parsed:
                             sources = parsed["sources"]
-                            with flow_container, st.expander(
-                                f"📚 Retrieved {len(sources)} documents"
+                            with (
+                                flow_container,
+                                st.expander(f"📚 Retrieved {len(sources)} documents"),
                             ):
                                 for src in sources:
                                     st.markdown(

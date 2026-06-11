@@ -245,9 +245,7 @@ async def test_messages_endpoint_unknown_session(client: httpx.AsyncClient) -> N
 # ---------------------------------------------------------------------------
 
 
-async def _backdate_session(
-    session_id: str, *, days: int = 0, hours: int = 0
-) -> None:
+async def _backdate_session(session_id: str, *, days: int = 0, hours: int = 0) -> None:
     """Set last_activity_at into the past, directly in the DB."""
     factory = get_session_factory()
     async with factory() as db:
@@ -264,8 +262,6 @@ async def _backdate_session(
 async def test_chat_expired_session_returns_410(client: httpx.AsyncClient) -> None:
     sid = await _create_session(client)
     await _backdate_session(sid, days=2)
-    response = await client.post(
-        "/chat", json={"question": "Hello", "session_id": sid}
-    )
+    response = await client.post("/chat", json={"question": "Hello", "session_id": sid})
     assert response.status_code == 410
     assert response.json()["error"]["code"] == "SESSION_EXPIRED"

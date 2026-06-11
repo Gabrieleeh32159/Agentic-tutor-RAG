@@ -72,7 +72,9 @@ def chat_turn(question: str, session_id: str) -> None:
                     chunks = src.get("chunks", [])
                     for j, chunk in enumerate(chunks, 1):
                         preview = chunk["chunk_text"][:120].replace("\n", " ")
-                        print(f"     Chunk {j} (score {chunk['score']:.4f}): {preview}...")
+                        print(
+                            f"     Chunk {j} (score {chunk['score']:.4f}): {preview}..."
+                        )
                 print(f"  {'─' * 50}\n")
 
             elif "step" in parsed:
@@ -84,11 +86,13 @@ def chat_turn(question: str, session_id: str) -> None:
                     is_relevant = parsed.get("is_relevant", False)
                     grade_query = parsed.get("query", "")
                     icon = "✅" if is_relevant else "❌"
-                    print(f"  {icon} [{step}] Results for \"{grade_query}\" are {'relevant' if is_relevant else 'not relevant'}")
+                    print(
+                        f'  {icon} [{step}] Results for "{grade_query}" are {"relevant" if is_relevant else "not relevant"}'
+                    )
                 elif step == "rewrite_query":
                     retry = parsed.get("retry", 0)
                     new_q = parsed.get("new_question", "")
-                    print(f"  🔄 [{step}] Attempt {retry}: \"{new_q}\"")
+                    print(f'  🔄 [{step}] Attempt {retry}: "{new_q}"')
 
             elif "token" in parsed:
                 if not answer_started:
@@ -107,7 +111,9 @@ def chat_turn(question: str, session_id: str) -> None:
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: uv run python scripts/chat.py 'your question' [session-id]")
-        print("       After the first message, enter follow-up questions interactively.")
+        print(
+            "       After the first message, enter follow-up questions interactively."
+        )
         sys.exit(1)
 
     question = sys.argv[1]

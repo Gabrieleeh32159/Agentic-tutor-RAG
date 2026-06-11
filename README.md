@@ -62,10 +62,7 @@ docker compose up -d
 # 5. Run the API (tables are created automatically on startup)
 uv run fastapi dev app/main.py
 
-# 6. Load the sample dataset (20 docs across math, biology, history, programming, science)
-uv run python scripts/ingest_documents.py
-
-# 7. Chat with it
+# 6. Chat with it
 uv run streamlit run scripts/streamlit_app.py   # visual UI at http://localhost:8501
 #   or
 uv run python scripts/chat.py                    # terminal client
@@ -77,13 +74,15 @@ Set `ANTHROPIC_API_KEY` as well to enable automatic fallback if OpenAI errors ou
 
 | Method & path | Description |
 |---|---|
-| `POST /documents` | Ingest one document; chunks + embeds it. |
-| `POST /documents/bulk` | Ingest a batch (used by the loader script). |
-| `GET /search` | Semantic search: `q` (required), `limit` (1–20), optional `subject`, `level`. Returns documents with similarity scores and matched chunks. |
-| `POST /chat` | Ask a question; returns an SSE stream of tokens, retrieval/grade/rewrite step events, and the source documents. Pass `session_id` to continue a conversation. |
-| `GET /chat/sessions` | List chat sessions. |
-| `GET /chat/sessions/{id}/messages` | Full message history for a session. |
-| `DELETE /chat/sessions/{id}` | Delete a session and its messages. |
+| `POST /sessions` | Create a workspace session. |
+| `GET /sessions/{id}` | Session detail incl. its documents (touches activity). |
+| `DELETE /sessions/{id}` | Delete a session, its documents, and messages. |
+| `POST /sessions/{id}/documents` | Multipart upload (.txt / .md for now); returns 202 with ingestion status. |
+| `GET /sessions/{id}/documents` | List the session's documents with status. |
+| `DELETE /sessions/{id}/documents/{doc_id}` | Remove a document. |
+| `GET /sessions/{id}/messages` | Full message history for a session. |
+| `GET /search` | Semantic search within a session: `q` and `session_id` (required), `limit` (1–20). |
+| `POST /chat` | Ask a question (`{question, session_id}`); returns an SSE stream of tokens, retrieval/grade/rewrite step events, and source documents. |
 | `GET /health` | Liveness probe. |
 
 Interactive docs at `http://localhost:8000/docs` once the server is running.

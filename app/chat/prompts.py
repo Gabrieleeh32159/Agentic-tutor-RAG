@@ -44,5 +44,5 @@ MAX_RETRIES = 2
 HIGH_RELEVANCE_THRESHOLD = 0.75
 LOW_RELEVANCE_THRESHOLD = 0.25
 NOT_FOUND_MESSAGE = (
-    "No relevant documents were found in the knowledge base for this query."
+    "No relevant content was found in your uploaded documents for this query."
 )

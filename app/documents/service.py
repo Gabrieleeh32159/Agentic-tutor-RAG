@@ -21,7 +21,9 @@ _splitter = RecursiveCharacterTextSplitter(
 )
 
 
-def build_enriched_text(filename: str, chunk: str, page_number: int | None = None) -> str:
+def build_enriched_text(
+    filename: str, chunk: str, page_number: int | None = None
+) -> str:
     """Text that actually gets embedded: file context + chunk content."""
     location = f" | Page: {page_number}" if page_number is not None else ""
     return f"File: {filename}{location}\nContent: {chunk}"

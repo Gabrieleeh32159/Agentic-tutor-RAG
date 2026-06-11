@@ -25,11 +25,15 @@ async def _upload_md(client: httpx.AsyncClient, sid: str, name: str, text: str) 
 async def seeded_session(client: httpx.AsyncClient) -> tuple[httpx.AsyncClient, str]:
     sid = await _create_session(client)
     await _upload_md(
-        client, sid, "derivatives.md",
+        client,
+        sid,
+        "derivatives.md",
         "A derivative measures how a function changes as its input changes.",
     )
     await _upload_md(
-        client, sid, "cells.md",
+        client,
+        sid,
+        "cells.md",
         "Eukaryotic cells contain membrane-bound organelles.",
     )
     return client, sid
