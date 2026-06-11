@@ -67,6 +67,11 @@ class ProviderUnavailableError(AppError):
     status_code = 503
 
 
+class IngestionBusyError(AppError):
+    code = "INGESTION_BUSY"
+    status_code = 503
+
+
 def error_envelope(code: str, message: str) -> dict:
     return {
         "error": {

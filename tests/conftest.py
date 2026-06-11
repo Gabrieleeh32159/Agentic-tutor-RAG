@@ -224,6 +224,16 @@ def mock_chat_model():
 
 
 @pytest.fixture(autouse=True)
+def _reset_ingestion_semaphore() -> None:
+    """Reset the lazy-init semaphore before each test so every test gets a
+    fresh semaphore bound to its own event loop (fixes event-loop footgun)."""
+    import app.ingestion.service as ingestion_service
+
+    ingestion_service._ingestion_semaphore = None
+    yield  # type: ignore[misc]
+
+
+@pytest.fixture(autouse=True)
 async def _init_db() -> AsyncIterator[None]:
     """Initialize the DB engine and create tables for each test (avoids event-loop mismatch)."""
     settings = get_settings()

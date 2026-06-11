@@ -26,7 +26,29 @@ _tasks: set[asyncio.Task] = set()
 # Bound concurrency: max 2 concurrent parse/OCR operations on this process.
 # pypdf/pypdfium2 are sync CPU-bound; the semaphore limits event-loop starvation
 # and peak memory on a single 512 MB container that also serves SSE streams.
-_ingestion_semaphore = asyncio.Semaphore(2)
+MAX_CONCURRENT_INGESTIONS = 2
+
+# Lazy-initialised so it binds to the running event loop, not the import-time
+# loop (which can differ under pytest's per-test loop isolation).
+_ingestion_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    global _ingestion_semaphore
+    if _ingestion_semaphore is None:
+        _ingestion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_INGESTIONS)
+    return _ingestion_semaphore
+
+
+# Cap on the total number of documents allowed in the queue (pending + in-flight).
+# Each queued task pins its data bytes (≤10 MB) in memory; without a cap a burst
+# of uploads can exhaust the 512 MB container.
+MAX_QUEUED_INGESTIONS = 10
+
+
+def ingestion_queue_full() -> bool:
+    """Return True when the in-flight task set is at or above the queue cap."""
+    return len(_tasks) >= MAX_QUEUED_INGESTIONS
 
 
 def schedule_processing(document_id: uuid.UUID, data: bytes, extension: str) -> None:
@@ -50,7 +72,7 @@ async def process_document(document_id: uuid.UUID, data: bytes, extension: str) 
     CPU-bound parsing and rasterization are offloaded to a thread pool via
     asyncio.to_thread; the semaphore bounds peak concurrency to 2.
     """
-    async with _ingestion_semaphore:
+    async with _get_semaphore():
         factory = get_session_factory()
         async with factory() as db:
             document = await db.get(Document, document_id)
@@ -158,6 +180,7 @@ async def process_document(document_id: uuid.UUID, data: bytes, extension: str) 
                     document.error_message = "Failed to process the document."
                 document.status = DocumentStatus.FAILED
                 document.stage = None
+                document.progress = 0
                 try:
                     db.add(document)
                     await db.commit()

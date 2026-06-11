@@ -13,12 +13,13 @@ from app.documents.service import (
     list_documents,
 )
 from app.ingestion.registry import SUPPORTED_TYPES, sniff_matches_extension
-from app.ingestion.service import schedule_processing
+from app.ingestion.service import ingestion_queue_full, schedule_processing
 from app.sessions.service import get_active_session, touch_session
 from app.shared.config import get_settings
 from app.shared.database import get_session
 from app.shared.errors import (
     FileTooLargeError,
+    IngestionBusyError,
     SessionLimitExceededError,
     UnsupportedFileTypeError,
 )
@@ -44,6 +45,11 @@ async def upload_document(
     if await count_documents(db, session_id) >= settings.MAX_DOCS_PER_SESSION:
         raise SessionLimitExceededError(
             f"This session already has {settings.MAX_DOCS_PER_SESSION} documents"
+        )
+
+    if ingestion_queue_full():
+        raise IngestionBusyError(
+            "The server is processing too many documents right now. Try again shortly."
         )
 
     filename = file.filename or "upload"

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 
 from app.ingestion.service import wait_for_ingestion
 
@@ -151,6 +152,7 @@ async def test_corrupt_pdf_fails_async(client: httpx.AsyncClient) -> None:
     assert final["status"] == "failed"
     assert final["error_code"] == "parse_failed"
     assert final["error_message"]
+    assert final["progress"] == 0
 
 
 async def test_page_limit_fails_async(client: httpx.AsyncClient) -> None:
@@ -245,6 +247,53 @@ async def test_unknown_extension_still_415(client: httpx.AsyncClient) -> None:
 
 
 # --- Hard Requirement 4: encrypted PDF tests ---
+
+
+async def test_upload_rejected_when_queue_full(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.ingestion.service as ingestion_service
+
+    monkeypatch.setattr(ingestion_service, "MAX_QUEUED_INGESTIONS", 0)
+    sid = await _create_session(client)
+    data = (FIXTURES / "sample.txt").read_bytes()
+    response = await client.post(
+        f"/sessions/{sid}/documents",
+        files={"file": ("notes.txt", data, "text/plain")},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "INGESTION_BUSY"
+
+
+async def test_delete_document_during_processing(client: httpx.AsyncClient) -> None:
+    sid = await _create_session(client)
+    data = (FIXTURES / "sample.pdf").read_bytes()
+    response = await client.post(
+        f"/sessions/{sid}/documents",
+        files={"file": ("sample.pdf", data, "application/pdf")},
+    )
+    assert response.status_code == 202
+    doc = response.json()
+
+    # Delete immediately - the background task may be queued or mid-flight
+    delete = await client.delete(f"/sessions/{sid}/documents/{doc['id']}")
+    assert delete.status_code == 204
+
+    await wait_for_ingestion()
+
+    docs = (await client.get(f"/sessions/{sid}/documents")).json()
+    assert docs == []
+
+    from sqlalchemy import func, select
+
+    from app.documents.models import DocumentChunk
+    from app.shared.database import get_session_factory
+
+    async with get_session_factory()() as db:
+        count = (
+            await db.execute(select(func.count()).select_from(DocumentChunk))
+        ).scalar_one()
+    assert count == 0
 
 
 async def test_hard_encrypted_pdf_fails_async(client: httpx.AsyncClient) -> None:
