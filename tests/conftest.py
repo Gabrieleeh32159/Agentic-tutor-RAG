@@ -168,6 +168,14 @@ class FakeChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
+        last_human = ""
+        for m in reversed(messages):
+            if getattr(m, "type", "") == "human" and isinstance(m.content, str):
+                last_human = m.content
+                break
+        if "TRIGGER_STREAM_FAILURE" in last_human:
+            raise RuntimeError("boom - simulated mid-stream provider failure")
+
         result = self._generate(messages, stop, run_manager, **kwargs)
         msg = result.generations[0].message
 

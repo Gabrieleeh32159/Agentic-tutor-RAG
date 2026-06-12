@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     MAX_DOCS_PER_SESSION: int = 20
     MAX_CHUNKS_PER_DOC: int = 500
 
+    CHAT_STREAM_TIMEOUT_SECONDS: int = 120
+
     APP_ENV: str = "local"
     LOG_LEVEL: str = "INFO"
 

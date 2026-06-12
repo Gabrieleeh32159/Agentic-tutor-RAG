@@ -23,6 +23,8 @@ def get_vision_model() -> BaseChatModel:
             model=settings.VISION_MODEL,
             api_key=settings.OPENAI_API_KEY,
             temperature=0,
+            timeout=90,  # explicit timeout + SDK exponential-backoff retries (see Phase 3 plan: no tenacity stacking)
+            max_retries=2,
         )
     return _vision_model
 
@@ -36,6 +38,8 @@ def get_chat_model() -> BaseChatModel:
             model=settings.CHAT_MODEL,
             api_key=settings.OPENAI_API_KEY,
             streaming=True,
+            timeout=60,  # explicit timeout + SDK exponential-backoff retries (see Phase 3 plan: no tenacity stacking)
+            max_retries=2,
         )
         if settings.ANTHROPIC_API_KEY:
             from langchain_anthropic import ChatAnthropic
@@ -43,6 +47,8 @@ def get_chat_model() -> BaseChatModel:
             secondary = ChatAnthropic(
                 model="claude-haiku-4-5-20251001",
                 api_key=settings.ANTHROPIC_API_KEY,
+                timeout=60,  # explicit timeout + SDK exponential-backoff retries (see Phase 3 plan: no tenacity stacking)
+                max_retries=2,
             )
             _chat_model = primary.with_fallbacks([secondary])
         else:

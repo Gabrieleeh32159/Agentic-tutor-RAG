@@ -267,3 +267,39 @@ async def test_chat_expired_session_returns_410(client: httpx.AsyncClient) -> No
     response = await client.post("/chat", json={"question": "Hello", "session_id": sid})
     assert response.status_code == 410
     assert response.json()["error"]["code"] == "SESSION_EXPIRED"
+
+
+# ---------------------------------------------------------------------------
+# Mid-stream failure protocol
+# ---------------------------------------------------------------------------
+
+
+async def test_midstream_failure_emits_structured_error_and_done(
+    chat_session: tuple[httpx.AsyncClient, str],
+) -> None:
+    """An exception inside the agent stream must end with a structured error
+    event (no leaked exception text) followed by [DONE], and the user message
+    must still be persisted."""
+    client, sid = chat_session
+    response = await client.post(
+        "/chat",
+        json={
+            "question": "What is a derivative? TRIGGER_STREAM_FAILURE",
+            "session_id": sid,
+        },
+    )
+    assert response.status_code == 200
+    lines = _parse_sse(response.text)
+
+    error_lines = [ln for ln in lines if '"error"' in ln]
+    assert len(error_lines) == 1
+    payload = json.loads(error_lines[0].removeprefix("data: "))
+    assert payload["error"]["code"] == "STREAM_FAILED"
+    assert "boom" not in payload["error"]["message"]  # raw exception not leaked
+    assert lines[-1] == "data: [DONE]"
+
+    messages = (await client.get(f"/sessions/{sid}/messages")).json()
+    assert any(
+        m["role"] == "human" and "TRIGGER_STREAM_FAILURE" in m["content"]
+        for m in messages
+    )

@@ -18,7 +18,11 @@ class EmbeddingProvider(ABC):
 class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self) -> None:
         settings = get_settings()
-        self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self._client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            timeout=30.0,  # explicit timeout + SDK exponential-backoff retries (see Phase 3 plan: no tenacity stacking)
+            max_retries=3,
+        )
         self._model = settings.EMBEDDING_MODEL
 
     async def embed(self, text: str) -> list[float]:
