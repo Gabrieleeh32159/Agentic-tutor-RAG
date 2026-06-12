@@ -19,6 +19,7 @@ from app.chat.service import (
 )
 from app.sessions.service import get_active_session, touch_session, update_session_title
 from app.shared.database import get_session, get_session_factory
+from app.shared.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("")
+@limiter.limit("20/minute")
 async def chat(
     body: ChatRequest,
     request: Request,

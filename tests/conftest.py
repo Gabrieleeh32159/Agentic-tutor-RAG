@@ -224,6 +224,15 @@ def mock_chat_model():
 
 
 @pytest.fixture(autouse=True)
+def _disable_rate_limiting():
+    from app.shared.rate_limit import limiter
+
+    limiter.enabled = False
+    yield
+    limiter.enabled = False
+
+
+@pytest.fixture(autouse=True)
 def _reset_ingestion_semaphore() -> None:
     """Reset the lazy-init semaphore before each test so every test gets a
     fresh semaphore bound to its own event loop (fixes event-loop footgun)."""

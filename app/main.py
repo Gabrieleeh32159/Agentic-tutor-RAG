@@ -5,8 +5,11 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIASGIMiddleware
 from sqlmodel import SQLModel
 
 from app.chat.models import ChatMessage  # noqa: F401
@@ -21,8 +24,9 @@ from app.shared.database import (
     get_session_factory,
     init_engine,
 )
-from app.shared.errors import register_exception_handlers
+from app.shared.errors import error_envelope, register_exception_handlers
 from app.shared.logging import RequestIDMiddleware, setup_logging
+from app.shared.rate_limit import limiter
 
 
 @asynccontextmanager
@@ -61,6 +65,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_middleware(SlowAPIASGIMiddleware)
 app.add_middleware(RequestIDMiddleware)
 register_exception_handlers(app)
 app.add_middleware(
@@ -71,6 +77,16 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Request-ID"],
 )
+
+
+@app.exception_handler(RateLimitExceeded)
+async def handle_rate_limit(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content=error_envelope(
+            "RATE_LIMITED", f"Rate limit exceeded: {exc.detail}. Try again later."
+        ),
+    )
 
 
 @app.get("/health", tags=["system"])

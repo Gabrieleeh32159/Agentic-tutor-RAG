@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, UploadFile, status
+from fastapi import APIRouter, Depends, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.documents.models import DocumentResponse
@@ -23,6 +23,7 @@ from app.shared.errors import (
     SessionLimitExceededError,
     UnsupportedFileTypeError,
 )
+from app.shared.rate_limit import limiter
 
 router = APIRouter(prefix="/sessions/{session_id}/documents", tags=["documents"])
 
@@ -33,8 +34,10 @@ def _extension(filename: str) -> str:
 
 
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("10/hour")
 async def upload_document(
     session_id: uuid.UUID,
+    request: Request,
     file: UploadFile,
     db: AsyncSession = Depends(get_session),
 ) -> DocumentResponse:
