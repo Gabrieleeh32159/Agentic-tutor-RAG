@@ -7,9 +7,10 @@ from app.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Module-level cache: None means "not yet constructed"; the handler instance
-# once built with valid keys; stays None forever when keys are absent.
-_handler: Any | None = None
+# Set to True once the process-wide Langfuse singleton has been registered.
+# The heavy client is shared; individual handlers are created per-call so
+# that last_trace_id stays per-request (chat and OCR would otherwise race).
+_client_registered = False
 
 
 def _enabled() -> bool:
@@ -18,33 +19,31 @@ def _enabled() -> bool:
 
 
 def get_langfuse_handler() -> Any | None:
-    """Return a LangChain CallbackHandler for Langfuse, or None when keys are unset.
+    """LangChain callback handler for Langfuse, or None when keys are unset.
 
-    Returning None keeps every call site a strict no-op (tests remain key-free).
-
-    SDK adaptation note (langfuse 4.x):
-      - Import path is ``langfuse.langchain.CallbackHandler`` — same as the v3
-        plan's ``from langfuse.langchain import CallbackHandler``.
-      - Constructor accepts ``public_key`` directly (no env-var-only path), so
-        we pass the settings values explicitly.  The global Langfuse client
-        (``LangfuseResourceManager._instances``) is a singleton keyed by
-        public_key; calling this function multiple times is idempotent.
+    A fresh handler per call keeps ``last_trace_id`` per-request (chat and
+    background OCR would otherwise race on a shared handler). The heavy
+    Langfuse client behind it is a process-wide singleton, registered once
+    via ``Langfuse(public_key=..., secret_key=..., host=...)`` so that
+    ``get_client(public_key=pk)`` resolves it rather than returning a
+    disabled no-op.
     """
-    global _handler
+    global _client_registered
     if not _enabled():
         return None
-    if _handler is None:
-        settings = get_settings()
-        # v4: pass keys explicitly so the SDK does NOT log "client disabled"
-        # warnings.  host is passed via the LANGFUSE_HOST env var convention;
-        # the Langfuse() constructor also reads LANGFUSE_HOST directly.
-        import os
+    settings = get_settings()
+    if not _client_registered:
+        from langfuse import Langfuse
 
-        from langfuse.langchain import CallbackHandler
+        Langfuse(
+            public_key=settings.LANGFUSE_PUBLIC_KEY,
+            secret_key=settings.LANGFUSE_SECRET_KEY,
+            host=settings.LANGFUSE_HOST,
+        )
+        _client_registered = True
+    from langfuse.langchain import CallbackHandler
 
-        os.environ.setdefault("LANGFUSE_HOST", settings.LANGFUSE_HOST)
-        _handler = CallbackHandler(public_key=settings.LANGFUSE_PUBLIC_KEY)
-    return _handler
+    return CallbackHandler(public_key=settings.LANGFUSE_PUBLIC_KEY)
 
 
 def score_trace(handler: Any | None, *, name: str, value: float) -> None:

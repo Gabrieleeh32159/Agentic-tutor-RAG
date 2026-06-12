@@ -13,25 +13,35 @@ def test_handler_is_none_without_keys() -> None:
     assert get_langfuse_handler() is None
 
 
-def test_handler_built_with_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    from langfuse._client.resource_manager import LangfuseResourceManager
-
+def test_handler_built_with_keys_is_actually_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import app.shared.observability as obs
 
     settings = get_settings()
-    monkeypatch.setattr(settings, "LANGFUSE_PUBLIC_KEY", "pk-lf-test")
-    monkeypatch.setattr(settings, "LANGFUSE_SECRET_KEY", "sk-lf-test")
-    # Reset the module-level cache so get_langfuse_handler() creates a new one
-    monkeypatch.setattr(obs, "_handler", None)
-    handler = get_langfuse_handler()
-    assert handler is not None
-    # Cleanup: reset cache and tear down the Langfuse singleton so it doesn't
-    # interfere with subsequent tests (v4 SDK uses a class-level _instances dict).
-    monkeypatch.setattr(obs, "_handler", None)
-    with LangfuseResourceManager._lock:
-        for instance in LangfuseResourceManager._instances.values():
-            instance.shutdown()
-        LangfuseResourceManager._instances.clear()
+    monkeypatch.setattr(settings, "LANGFUSE_PUBLIC_KEY", "pk-test")
+    monkeypatch.setattr(settings, "LANGFUSE_SECRET_KEY", "sk-test")
+    monkeypatch.setattr(obs, "_client_registered", False)
+
+    try:
+        handler = obs.get_langfuse_handler()
+        assert handler is not None
+        # _langfuse_client is set by LangchainCallbackHandler.__init__ via get_client()
+        client = getattr(handler, "_langfuse_client", None)
+        assert client is not None
+        # _tracing_enabled lives on the Langfuse client instance
+        assert getattr(client, "_tracing_enabled", False) is True
+    finally:
+        from langfuse._client.resource_manager import LangfuseResourceManager
+
+        with LangfuseResourceManager._lock:
+            for instance in list(LangfuseResourceManager._instances.values()):
+                try:
+                    instance.shutdown()
+                except Exception:
+                    pass
+            LangfuseResourceManager._instances.clear()
+        monkeypatch.setattr(obs, "_client_registered", False)
 
 
 def test_score_trace_noops_without_keys() -> None:

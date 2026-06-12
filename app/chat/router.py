@@ -91,7 +91,6 @@ async def chat(
 
             new_messages: list = []
             retrieved_chunks: list[str] = []
-            retrieved_doc_ids: list[str] = []
             search_attempts: int = 0
 
             try:
@@ -119,11 +118,7 @@ async def chat(
                                     for source in sources
                                     for chunk in source.get("chunks", [])
                                 ]
-                                retrieved_doc_ids[:] = [
-                                    s["document_id"]
-                                    for s in sources
-                                    if "document_id" in s
-                                ]
+                                # document ids land in the traced tool spans; no separate metadata needed
                                 search_attempts += 1
 
                             elif name == "grade_result":
