@@ -94,6 +94,15 @@ class FakeChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
+        # --- Grounding judge prompt ---
+        if any(
+            isinstance(m.content, str) and "grounding judge" in m.content.lower()
+            for m in messages
+        ):
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content="yes"))]
+            )
+
         # --- Grader prompt ---
         if any(
             isinstance(m.content, str) and "relevance grader" in m.content.lower()
@@ -229,6 +238,14 @@ def mock_chat_model():
 
     with patch.object(chat_service, "build_graph", _patched_build):
         yield
+
+
+@pytest.fixture(autouse=True)
+def mock_judge_model(monkeypatch: pytest.MonkeyPatch):
+    """The grounding judge uses the fake chat model in tests."""
+    import app.chat.router as chat_router
+
+    monkeypatch.setattr(chat_router, "get_chat_model", lambda: FakeChatModel())
 
 
 @pytest.fixture(autouse=True)

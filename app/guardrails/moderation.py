@@ -40,8 +40,6 @@ async def moderate_text(text: str) -> ModerationResult:
     )
     result = response.results[0]
     categories = [
-        name
-        for name, value in result.categories.model_dump().items()
-        if value
+        name for name, value in result.categories.model_dump().items() if value
     ]
     return ModerationResult(flagged=result.flagged, categories=categories)

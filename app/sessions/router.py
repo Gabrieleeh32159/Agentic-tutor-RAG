@@ -56,6 +56,7 @@ async def get_messages(
             content=m.content,
             tool_calls=m.tool_calls,
             tool_call_id=m.tool_call_id,
+            grounded=m.grounded,
             created_at=m.created_at,
         )
         for m in messages

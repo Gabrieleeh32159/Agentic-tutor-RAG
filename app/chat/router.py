@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from httpx import ASGITransport
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.models import ChatRequest, NodeName
@@ -18,10 +18,12 @@ from app.chat.service import (
     load_session_messages,
     save_messages,
 )
+from app.guardrails.grounding import check_grounding
 from app.guardrails.input_check import check_input
 from app.sessions.service import get_active_session, touch_session, update_session_title
 from app.shared.config import get_settings
 from app.shared.database import get_session, get_session_factory
+from app.shared.llm import get_chat_model
 from app.shared.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -70,6 +72,7 @@ async def chat(
             yield f"data: {json.dumps({'session_id': str(session_id)})}\n\n"
 
             new_messages: list = []
+            retrieved_chunks: list[str] = []
 
             try:
                 async with asyncio.timeout(get_settings().CHAT_STREAM_TIMEOUT_SECONDS):
@@ -89,6 +92,12 @@ async def chat(
                                 attempt = data.get("attempt", 0)
                                 yield f"data: {json.dumps({'step': 'retrieve', 'detail': f'Search attempt {attempt}: found {len(sources)} documents for "{query}"'})}\n\n"
                                 yield f"data: {json.dumps({'sources': sources})}\n\n"
+                                # Collect chunk texts for grounding judge
+                                for source in sources:
+                                    for chunk in source.get("chunks", []):
+                                        retrieved_chunks.append(
+                                            chunk.get("chunk_text", "")
+                                        )
 
                             elif name == "grade_result":
                                 data = event["data"]
@@ -156,12 +165,24 @@ async def chat(
                     + "\n\n"
                 )
 
+            # --- Grounding verdict (annotating; never blocks the stream) ---
+            final_answer = ""
+            for msg in reversed(new_messages):
+                content = getattr(msg, "content", "")
+                if isinstance(msg, AIMessage) and isinstance(content, str) and content:
+                    final_answer = content
+                    break
+            verdict = await check_grounding(
+                get_chat_model(), final_answer, retrieved_chunks
+            )
+            yield f"data: {json.dumps({'grounding': {'verdict': verdict}})}\n\n"
+
             # --- Persist new messages BEFORE yielding [DONE] ---
             # (After the last yield, the client may disconnect and cancel the generator)
             try:
                 async with get_session_factory()() as db:
                     msgs_to_save = [user_msg] + new_messages
-                    await save_messages(db, session_id, msgs_to_save)
+                    await save_messages(db, session_id, msgs_to_save, grounded=verdict)
             except Exception:
                 logger.exception("Failed to save messages")
 

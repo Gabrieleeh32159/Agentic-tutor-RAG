@@ -12,10 +12,21 @@ logger = logging.getLogger(__name__)
 # positives block legitimate questions, so each pattern targets phrasing that
 # has no plausible use in a question about one's own documents.
 _INJECTION_PATTERNS = [
-    re.compile(r"ignore\s+(all\s+|any\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|messages|rules)", re.IGNORECASE),
-    re.compile(r"disregard\s+(all\s+)?(your|the|previous|prior)?\s*(system\s+)?(prompt|instructions|rules)", re.IGNORECASE),
-    re.compile(r"(reveal|print|show|output|repeat)\s+(me\s+)?(your|the)\s+(system\s+)?(prompt|instructions)", re.IGNORECASE),
-    re.compile(r"you\s+are\s+now\s+(dan|unrestricted|jailbroken|free\s+of)", re.IGNORECASE),
+    re.compile(
+        r"ignore\s+(all\s+|any\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|messages|rules)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"disregard\s+(all\s+)?(your|the|previous|prior)?\s*(system\s+)?(prompt|instructions|rules)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(reveal|print|show|output|repeat)\s+(me\s+)?(your|the)\s+(system\s+)?(prompt|instructions)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"you\s+are\s+now\s+(dan|unrestricted|jailbroken|free\s+of)", re.IGNORECASE
+    ),
     re.compile(r"\bjailbreak\b", re.IGNORECASE),
 ]
 

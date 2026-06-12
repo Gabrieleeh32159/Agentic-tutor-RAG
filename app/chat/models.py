@@ -43,6 +43,9 @@ class ChatMessage(SQLModel, table=True):
     tool_call_id: str | None = SQLField(
         default=None, sa_column=Column(String(64), nullable=True)
     )
+    grounded: str | None = SQLField(
+        default=None, sa_column=Column(String(12), nullable=True)
+    )
     created_at: datetime = SQLField(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -65,6 +68,7 @@ class ChatMessageResponse(BaseModel):
     content: str
     tool_calls: str | None = None
     tool_call_id: str | None = None
+    grounded: str | None = None
     created_at: datetime
 
 

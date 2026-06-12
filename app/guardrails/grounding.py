@@ -27,12 +27,7 @@ async def check_grounding(llm, answer: str, chunks: list[str]) -> str:
     excerpts = "\n\n".join(chunks)[:_MAX_EXCERPT_CHARS]
     messages = [
         SystemMessage(content=GROUNDING_PROMPT),
-        HumanMessage(
-            content=(
-                f"Answer:\n{answer}\n\n"
-                f"Retrieved excerpts:\n{excerpts}"
-            )
-        ),
+        HumanMessage(content=(f"Answer:\n{answer}\n\nRetrieved excerpts:\n{excerpts}")),
     ]
     try:
         response = await llm.ainvoke(messages)

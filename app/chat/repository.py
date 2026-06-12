@@ -46,7 +46,9 @@ async def save_messages(
     session: AsyncSession,
     session_id: uuid.UUID,
     messages: list[BaseMessage],
+    grounded: str | None = None,
 ) -> None:
+    rows: list[ChatMessage] = []
     for msg in messages:
         if isinstance(msg, HumanMessage):
             role = "human"
@@ -76,7 +78,13 @@ async def save_messages(
             tool_calls=tool_calls_json,
             tool_call_id=tool_call_id,
         )
+        rows.append(row)
         session.add(row)
+    if grounded is not None:
+        for row in reversed(rows):
+            if row.role == "ai" and row.content:
+                row.grounded = grounded
+                break
     await session.commit()
 
 

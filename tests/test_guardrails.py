@@ -77,9 +77,7 @@ async def test_moderation_flagged_question_blocked(
     monkeypatch.setattr(moderation_module, "moderate_text", _flagged)
 
     sid = await _create_session(client)
-    response = await client.post(
-        "/chat", json={"question": "Hola", "session_id": sid}
-    )
+    response = await client.post("/chat", json={"question": "Hola", "session_id": sid})
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "GUARDRAIL_BLOCKED"
 
@@ -95,17 +93,13 @@ async def test_moderation_outage_fails_open(
     monkeypatch.setattr(moderation_module, "moderate_text", _boom)
 
     sid = await _create_session(client)
-    response = await client.post(
-        "/chat", json={"question": "Hola", "session_id": sid}
-    )
+    response = await client.post("/chat", json={"question": "Hola", "session_id": sid})
     assert response.status_code == 200  # fail-open: the chat proceeds
 
 
 async def test_normal_chat_unaffected(client: httpx.AsyncClient) -> None:
     sid = await _create_session(client)
-    response = await client.post(
-        "/chat", json={"question": "Hola", "session_id": sid}
-    )
+    response = await client.post("/chat", json={"question": "Hola", "session_id": sid})
     assert response.status_code == 200
 
 
@@ -114,7 +108,13 @@ async def test_tool_output_is_delimited(client: httpx.AsyncClient) -> None:
     sid = await _create_session(client)
     upload = await client.post(
         f"/sessions/{sid}/documents",
-        files={"file": ("derivatives.md", b"A derivative measures change.", "text/markdown")},
+        files={
+            "file": (
+                "derivatives.md",
+                b"A derivative measures change.",
+                "text/markdown",
+            )
+        },
     )
     assert upload.status_code == 202
     from app.ingestion.service import wait_for_ingestion
@@ -146,7 +146,13 @@ async def _seeded_session(client: httpx.AsyncClient) -> str:
     sid = await _create_session(client)
     response = await client.post(
         f"/sessions/{sid}/documents",
-        files={"file": ("derivatives.md", b"A derivative measures change.", "text/markdown")},
+        files={
+            "file": (
+                "derivatives.md",
+                b"A derivative measures change.",
+                "text/markdown",
+            )
+        },
     )
     assert response.status_code == 202
     from app.ingestion.service import wait_for_ingestion
@@ -189,9 +195,7 @@ async def test_grounding_unverified_for_casual_chat(
     client: httpx.AsyncClient,
 ) -> None:
     sid = await _create_session(client)
-    response = await client.post(
-        "/chat", json={"question": "Hola", "session_id": sid}
-    )
+    response = await client.post("/chat", json={"question": "Hola", "session_id": sid})
     lines = _parse_sse(response.text)
     grounding_lines = [ln for ln in lines if '"grounding"' in ln]
     assert len(grounding_lines) == 1
