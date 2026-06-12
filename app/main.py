@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import update
 from sqlmodel import SQLModel
 
 from app.chat.models import ChatMessage  # noqa: F401
-from app.documents.models import Document, DocumentChunk, DocumentStatus  # noqa: F401
+from app.documents.models import Document, DocumentChunk  # noqa: F401
+from app.ingestion.service import shutdown_ingestion
+from app.sessions.cleanup import cleanup_loop, reconcile_interrupted_documents
 from app.sessions.models import Session  # noqa: F401
 from app.shared.config import get_settings
-from app.shared.database import close_engine, get_engine, init_engine
+from app.shared.database import (
+    close_engine,
+    get_engine,
+    get_session_factory,
+    init_engine,
+)
 from app.shared.errors import register_exception_handlers
 from app.shared.logging import RequestIDMiddleware, setup_logging
 
@@ -26,27 +34,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     async with get_engine().begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
-    # Startup reconciliation: mark rows orphaned by a previous restart as failed.
-    # Any document still in pending/processing state when the server comes up
-    # was left mid-flight by a crash — it will never complete, so surface it as
-    # failed/interrupted so clients aren't stuck polling forever.
-    async with get_engine().begin() as conn:
-        await conn.execute(
-            update(Document)
-            .where(
-                Document.status.in_([DocumentStatus.PENDING, DocumentStatus.PROCESSING])
-            )
-            .values(
-                status=DocumentStatus.FAILED,
-                stage=None,
-                error_code="interrupted",
-                error_message="Processing was interrupted by a server restart.",
-            )
+    factory = get_session_factory()
+    async with factory() as db:
+        interrupted = await reconcile_interrupted_documents(db)
+        await db.commit()
+    if interrupted:
+        logging.getLogger(__name__).warning(
+            "Marked %d interrupted documents as failed on startup", interrupted
         )
+
+    stop_cleanup = asyncio.Event()
+    cleanup_task = asyncio.create_task(cleanup_loop(stop_cleanup))
 
     try:
         yield
     finally:
+        stop_cleanup.set()
+        await cleanup_task
+        await shutdown_ingestion()
         await close_engine()
 
 

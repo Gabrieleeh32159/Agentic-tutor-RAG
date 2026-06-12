@@ -64,6 +64,18 @@ async def wait_for_ingestion() -> None:
         await asyncio.gather(*list(_tasks), return_exceptions=True)
 
 
+async def shutdown_ingestion() -> None:
+    """Cancel in-flight ingestion tasks and wait for them to settle.
+
+    Cancelled tasks leave pending/processing rows; startup reconciliation
+    marks them failed/interrupted on the next boot.
+    """
+    for task in list(_tasks):
+        task.cancel()
+    if _tasks:
+        await asyncio.gather(*list(_tasks), return_exceptions=True)
+
+
 async def process_document(document_id: uuid.UUID, data: bytes, extension: str) -> None:
     """Parse -> OCR -> chunk -> embed -> save, updating status/stage/progress.
 

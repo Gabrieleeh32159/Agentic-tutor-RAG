@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     CHAT_MODEL: str = "gpt-4o-mini"
 
     SESSION_TTL_HOURS: int = 24
+    CLEANUP_INTERVAL_MINUTES: int = 15
+    STALE_PROCESSING_MINUTES: int = 60
 
     MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
