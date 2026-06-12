@@ -43,6 +43,7 @@ async def chat(
     session_id = chat_session.id
 
     # --- Input guardrails (injection scan + moderation) ---
+    # InputCheckResult returned here is consumed by observability in Phase 5.
     await check_input(body.question)
 
     # --- Load history + build state ---
@@ -92,12 +93,13 @@ async def chat(
                                 attempt = data.get("attempt", 0)
                                 yield f"data: {json.dumps({'step': 'retrieve', 'detail': f'Search attempt {attempt}: found {len(sources)} documents for "{query}"'})}\n\n"
                                 yield f"data: {json.dumps({'sources': sources})}\n\n"
-                                # Collect chunk texts for grounding judge
-                                for source in sources:
-                                    for chunk in source.get("chunks", []):
-                                        retrieved_chunks.append(
-                                            chunk.get("chunk_text", "")
-                                        )
+                                # Replace (not extend) so only the final
+                                # attempt's chunks reach the grounding judge.
+                                retrieved_chunks[:] = [
+                                    chunk.get("chunk_text", "")
+                                    for source in sources
+                                    for chunk in source.get("chunks", [])
+                                ]
 
                             elif name == "grade_result":
                                 data = event["data"]
@@ -166,15 +168,22 @@ async def chat(
                 )
 
             # --- Grounding verdict (annotating; never blocks the stream) ---
-            final_answer = ""
-            for msg in reversed(new_messages):
-                content = getattr(msg, "content", "")
-                if isinstance(msg, AIMessage) and isinstance(content, str) and content:
-                    final_answer = content
-                    break
-            verdict = await check_grounding(
-                get_chat_model(), final_answer, retrieved_chunks
-            )
+            try:
+                final_answer = ""
+                for msg in reversed(new_messages):
+                    if (
+                        isinstance(msg, AIMessage)
+                        and isinstance(msg.content, str)
+                        and msg.content
+                    ):
+                        final_answer = msg.content
+                        break
+                verdict = await check_grounding(
+                    get_chat_model(), final_answer, retrieved_chunks
+                )
+            except Exception:
+                logger.exception("Grounding check failed; verdict unverified")
+                verdict = "unverified"
             yield f"data: {json.dumps({'grounding': {'verdict': verdict}})}\n\n"
 
             # --- Persist new messages BEFORE yielding [DONE] ---

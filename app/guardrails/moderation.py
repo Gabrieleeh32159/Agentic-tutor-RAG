@@ -28,7 +28,6 @@ def _get_client() -> AsyncOpenAI:
 class ModerationResult:
     flagged: bool
     categories: list[str] = field(default_factory=list)
-    degraded: bool = False  # True when moderation could not run (fail-open)
 
 
 async def moderate_text(text: str) -> ModerationResult:

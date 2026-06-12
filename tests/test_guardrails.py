@@ -41,6 +41,11 @@ def test_injection_scan_allows_normal_questions() -> None:
         "What does the document say about system design?",
         "Can you act as a tutor and explain page 3?",
         "Ignore the typos in my file and summarize it.",
+        # These must NOT be flagged as injection (Fix 1)
+        "Show me the instructions for installing the pump from my manual",
+        "Can you repeat the instructions from page 3 of my document?",
+        "Print the instructions section of the manual",
+        "What happens if players disregard the rules in section 2?",
     ]
     for question in allowed:
         assert scan_for_injection(question) is False, question
@@ -101,6 +106,21 @@ async def test_normal_chat_unaffected(client: httpx.AsyncClient) -> None:
     sid = await _create_session(client)
     response = await client.post("/chat", json={"question": "Hola", "session_id": sid})
     assert response.status_code == 200
+
+
+async def test_check_input_reports_degraded_moderation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.guardrails.moderation as moderation_module
+    from app.guardrails.input_check import InputCheckResult, check_input
+
+    async def _boom(text: str):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(moderation_module, "moderate_text", _boom)
+    result = await check_input("Hola")
+    assert isinstance(result, InputCheckResult)
+    assert result.moderation_degraded is True
 
 
 async def test_tool_output_is_delimited(client: httpx.AsyncClient) -> None:
