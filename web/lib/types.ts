@@ -27,8 +27,9 @@ export interface Document {
 
 export interface Session {
   id: string;
+  title: string | null;
   created_at: string;
-  expires_at: string;
+  last_activity_at: string;
   documents: Document[];
 }
 
