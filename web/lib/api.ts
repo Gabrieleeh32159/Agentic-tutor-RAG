@@ -48,6 +48,29 @@ async function request<T>(
   return res.json() as Promise<T>;
 }
 
+// ─── Health ───────────────────────────────────────────────────────────────────
+
+/**
+ * Ping the backend health endpoint.
+ * Resolves true when the server answers 2xx within `timeoutMs`; false otherwise
+ * (timeout, network failure, or non-2xx). Never throws — used as a cold-start gate.
+ */
+export async function checkHealth(timeoutMs = 3000): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BASE_URL}/health`, {
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
 /**
