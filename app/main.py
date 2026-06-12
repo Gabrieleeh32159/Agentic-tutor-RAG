@@ -72,7 +72,8 @@ register_exception_handlers(app)
 settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list({settings.FRONTEND_ORIGIN, "http://localhost:3000"}),
+    allow_origins=settings.frontend_origins,
+    allow_origin_regex=settings.FRONTEND_ORIGIN_REGEX or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -40,7 +40,20 @@ class Settings(BaseSettings):
 
     CHAT_STREAM_TIMEOUT_SECONDS: int = 120
 
+    # Comma-separated list of allowed browser origins (localhost:3000 is always
+    # added). Vercel mints a new deployment URL per deploy, so list the stable
+    # domain(s) here, e.g. "https://ask-your-pdfs.vercel.app".
     FRONTEND_ORIGIN: str = "http://localhost:3000"
+    # Optional regex matching additional origins (e.g. Vercel preview URLs):
+    #   r"https://ask-your-pdfs-[\w-]+\.vercel\.app"
+    FRONTEND_ORIGIN_REGEX: str = ""
+
+    @property
+    def frontend_origins(self) -> list[str]:
+        """FRONTEND_ORIGIN parsed as a list, with localhost:3000 always allowed."""
+        origins = {o.strip() for o in self.FRONTEND_ORIGIN.split(",") if o.strip()}
+        origins.add("http://localhost:3000")
+        return sorted(origins)
 
     APP_ENV: str = "local"
     LOG_LEVEL: str = "INFO"

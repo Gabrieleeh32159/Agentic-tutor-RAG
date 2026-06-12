@@ -22,8 +22,13 @@ services:
         sync: false
       - key: LANGFUSE_HOST
         value: https://cloud.langfuse.com
-      # Set to the deployed Vercel URL (e.g. https://ask-your-pdfs.vercel.app)
+      # Allowed browser origins. Use the STABLE Vercel domain (not the per-deploy
+      # URL): https://ask-your-pdfs.vercel.app. Comma-separate multiple origins.
       - key: FRONTEND_ORIGIN
+        sync: false
+      # Optional regex for additional origins, e.g. Vercel preview deploys:
+      #   https://ask-your-pdfs-[\w-]+\.vercel\.app
+      - key: FRONTEND_ORIGIN_REGEX
         sync: false
       # Render sits behind a proxy: without this uvicorn ignores X-Forwarded-For
       # and rate limiting keys every client on the load-balancer IP.
