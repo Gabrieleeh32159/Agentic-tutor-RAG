@@ -41,9 +41,9 @@ class Settings(BaseSettings):
     CHAT_STREAM_TIMEOUT_SECONDS: int = 120
 
     # Comma-separated list of allowed browser origins (localhost:3000 is always
-    # added). Vercel mints a new deployment URL per deploy, so list the stable
-    # domain(s) here, e.g. "https://ask-your-pdfs.vercel.app".
-    FRONTEND_ORIGIN: str = "http://localhost:3000"
+    # added). Defaults to the deployed Vercel domain so production works without
+    # a Render env var; override locally/in deploy as needed.
+    FRONTEND_ORIGIN: str = "https://ask-your-pdfs.vercel.app"
     # Optional regex matching additional origins (e.g. Vercel preview URLs):
     #   r"https://ask-your-pdfs-[\w-]+\.vercel\.app"
     FRONTEND_ORIGIN_REGEX: str = ""
