@@ -40,6 +40,8 @@ class Settings(BaseSettings):
 
     CHAT_STREAM_TIMEOUT_SECONDS: int = 120
 
+    FRONTEND_ORIGIN: str = "http://localhost:3000"
+
     APP_ENV: str = "local"
     LOG_LEVEL: str = "INFO"
 

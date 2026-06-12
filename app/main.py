@@ -69,9 +69,10 @@ app.state.limiter = limiter
 app.add_middleware(SlowAPIASGIMiddleware)
 app.add_middleware(RequestIDMiddleware)
 register_exception_handlers(app)
+settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=list({settings.FRONTEND_ORIGIN, "http://localhost:3000"}),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

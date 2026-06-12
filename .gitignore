@@ -27,3 +27,8 @@ htmlcov/
 
 # Postgres data (docker-compose)
 .pgdata/
+
+# Next.js frontend (web/ has its own .gitignore, but belt-and-suspenders)
+web/node_modules/
+web/.next/
+web/.env.local
