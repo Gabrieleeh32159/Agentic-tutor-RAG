@@ -2,35 +2,41 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from sqlalchemy import update
+
+from app.ingestion.service import wait_for_ingestion
+from app.sessions.models import Session
+from app.shared.database import get_session_factory
+
+MD_DERIVATIVES = b"A derivative measures how a function changes as its input changes."
+MD_CELLS = b"Eukaryotic cells contain membrane-bound organelles."
+
+
+async def _create_session(client: httpx.AsyncClient) -> str:
+    response = await client.post("/sessions")
+    assert response.status_code == 201
+    return response.json()["id"]
 
 
 @pytest.fixture
-async def seeded_chat_client(client: httpx.AsyncClient) -> httpx.AsyncClient:
-    """Seed DB with documents, then return the client for chat tests."""
-    docs = [
-        {
-            "title": "Introduction to Derivatives",
-            "content": "A derivative measures how a function changes as its input changes.",
-            "subject": "math",
-            "level": "introductory",
-        },
-        {
-            "title": "Cell Structure",
-            "content": "Eukaryotic cells contain membrane-bound organelles.",
-            "subject": "biology",
-            "level": "introductory",
-        },
-    ]
-    response = await client.post("/documents/bulk", json=docs)
-    assert response.status_code == 201
-    return client
+async def chat_session(client: httpx.AsyncClient) -> tuple[httpx.AsyncClient, str]:
+    """A session seeded with two ready documents."""
+    sid = await _create_session(client)
+    for name, content in [("derivatives.md", MD_DERIVATIVES), ("cells.md", MD_CELLS)]:
+        response = await client.post(
+            f"/sessions/{sid}/documents",
+            files={"file": (name, content, "text/markdown")},
+        )
+        assert response.status_code == 202
+    await wait_for_ingestion()
+    return client, sid
 
 
 def _parse_sse(body: str) -> list[str]:
-    """Extract data lines from an SSE response body."""
     return [line for line in body.split("\n") if line.startswith("data: ")]
 
 
@@ -51,104 +57,74 @@ def _collect_tokens(lines: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_chat_returns_streaming_response(
-    seeded_chat_client: httpx.AsyncClient,
+    chat_session: tuple[httpx.AsyncClient, str],
 ) -> None:
-    response = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
+    client, sid = chat_session
+    response = await client.post(
+        "/chat", json={"question": "What is a derivative?", "session_id": sid}
     )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
 
 
-@pytest.mark.asyncio
 async def test_chat_stream_contains_session_id(
-    seeded_chat_client: httpx.AsyncClient,
+    chat_session: tuple[httpx.AsyncClient, str],
 ) -> None:
-    response = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
+    client, sid = chat_session
+    response = await client.post(
+        "/chat", json={"question": "What is a derivative?", "session_id": sid}
     )
     lines = _parse_sse(response.text)
     first = json.loads(lines[0].removeprefix("data: "))
-    assert "session_id" in first
+    assert first["session_id"] == sid
 
 
-@pytest.mark.asyncio
-async def test_chat_stream_contains_sources(
-    seeded_chat_client: httpx.AsyncClient,
+async def test_chat_stream_contains_sources_with_filename(
+    chat_session: tuple[httpx.AsyncClient, str],
 ) -> None:
-    response = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
+    client, sid = chat_session
+    response = await client.post(
+        "/chat", json={"question": "What is a derivative?", "session_id": sid}
     )
     lines = _parse_sse(response.text)
-    sources_lines = [l for l in lines if '"sources"' in l]
+    sources_lines = [ln for ln in lines if '"sources"' in ln]
     assert len(sources_lines) > 0
     parsed = json.loads(sources_lines[0].removeprefix("data: "))
-    assert "sources" in parsed
-    assert isinstance(parsed["sources"], list)
     assert len(parsed["sources"]) > 0
-    assert "document_id" in parsed["sources"][0]
-    assert "title" in parsed["sources"][0]
-    assert "score" in parsed["sources"][0]
+    src = parsed["sources"][0]
+    assert "document_id" in src
+    assert "filename" in src
+    assert "score" in src
 
 
-@pytest.mark.asyncio
-async def test_chat_stream_contains_tokens(
-    seeded_chat_client: httpx.AsyncClient,
+async def test_chat_stream_full_answer_and_done(
+    chat_session: tuple[httpx.AsyncClient, str],
 ) -> None:
-    response = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
+    client, sid = chat_session
+    response = await client.post(
+        "/chat", json={"question": "What is a derivative?", "session_id": sid}
     )
     lines = _parse_sse(response.text)
-    token_lines = [l for l in lines if '"token"' in l]
-    assert len(token_lines) > 0
+    assert _collect_tokens(lines) == "This is a test answer."
     assert lines[-1] == "data: [DONE]"
 
 
-@pytest.mark.asyncio
-async def test_chat_stream_ends_with_done(
-    seeded_chat_client: httpx.AsyncClient,
+async def test_chat_only_searches_own_session(
+    chat_session: tuple[httpx.AsyncClient, str],
 ) -> None:
-    response = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
-    )
-    lines = _parse_sse(response.text)
-    assert lines[-1] == "data: [DONE]"
-
-
-@pytest.mark.asyncio
-async def test_chat_stream_full_answer(
-    seeded_chat_client: httpx.AsyncClient,
-) -> None:
-    response = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
-    )
-    lines = _parse_sse(response.text)
-    full_answer = _collect_tokens(lines)
-    assert full_answer == "This is a test answer."
-
-
-@pytest.mark.asyncio
-async def test_chat_with_subject_filter(
-    seeded_chat_client: httpx.AsyncClient,
-) -> None:
-    response = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "Tell me about cells", "subject": "biology"},
+    """A fresh session with no documents must not see the seeded docs."""
+    client, _ = chat_session
+    empty_sid = await _create_session(client)
+    response = await client.post(
+        "/chat", json={"question": "What is a derivative?", "session_id": empty_sid}
     )
     assert response.status_code == 200
     lines = _parse_sse(response.text)
-    sources_line = next(l for l in lines if '"sources"' in l)
-    parsed = json.loads(sources_line.removeprefix("data: "))
-    for src in parsed["sources"]:
-        assert src["title"] == "Cell Structure"
+    sources_lines = [ln for ln in lines if '"sources"' in ln]
+    for line in sources_lines:
+        parsed = json.loads(line.removeprefix("data: "))
+        assert parsed["sources"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -156,224 +132,174 @@ async def test_chat_with_subject_filter(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_chat_casual_no_search(client: httpx.AsyncClient) -> None:
-    """A casual greeting should get a direct response with no sources."""
-    response = await client.post("/chat", json={"question": "Hola"})
+    sid = await _create_session(client)
+    response = await client.post("/chat", json={"question": "Hola", "session_id": sid})
     assert response.status_code == 200
     lines = _parse_sse(response.text)
-    sources_lines = [l for l in lines if '"sources"' in l]
-    assert len(sources_lines) == 0
-    full_answer = _collect_tokens(lines)
-    assert len(full_answer) > 0
+    assert [ln for ln in lines if '"sources"' in ln] == []
+    assert len(_collect_tokens(lines)) > 0
     assert lines[-1] == "data: [DONE]"
 
 
 # ---------------------------------------------------------------------------
-# Session management
+# Persistence
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_chat_creates_session(
-    seeded_chat_client: httpx.AsyncClient,
+async def test_chat_messages_persisted(
+    chat_session: tuple[httpx.AsyncClient, str],
 ) -> None:
-    """First message should create a session and return session_id."""
-    response = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
+    client, sid = chat_session
+    await client.post(
+        "/chat", json={"question": "What is a derivative?", "session_id": sid}
     )
-    lines = _parse_sse(response.text)
-    first = json.loads(lines[0].removeprefix("data: "))
-    session_id = first["session_id"]
-    # Verify it's a valid UUID
-    uuid.UUID(session_id)
 
-
-@pytest.mark.asyncio
-async def test_chat_continues_session(
-    seeded_chat_client: httpx.AsyncClient,
-) -> None:
-    """Sending a second message to the same session should preserve context."""
-    # First message
-    r1 = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
-    )
-    lines1 = _parse_sse(r1.text)
-    session_id = json.loads(lines1[0].removeprefix("data: "))["session_id"]
-
-    # Second message to the same session
-    r2 = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "Explain more", "session_id": session_id},
-    )
-    assert r2.status_code == 200
-    lines2 = _parse_sse(r2.text)
-    sid2 = json.loads(lines2[0].removeprefix("data: "))["session_id"]
-    assert sid2 == session_id
-
-
-@pytest.mark.asyncio
-async def test_chat_session_messages(
-    seeded_chat_client: httpx.AsyncClient,
-) -> None:
-    """GET /chat/sessions/{id}/messages should return persisted messages."""
-    r = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
-    )
-    lines = _parse_sse(r.text)
-    session_id = json.loads(lines[0].removeprefix("data: "))["session_id"]
-
-    # Fetch messages
-    r2 = await seeded_chat_client.get(f"/chat/sessions/{session_id}/messages")
-    assert r2.status_code == 200
-    messages = r2.json()
-    assert len(messages) >= 2, f"Expected at least 2 messages (human + ai), got {len(messages)}: {messages}"
-    roles = [m["role"] for m in messages]
-    assert roles[0] == "human"
-    assert "ai" in roles, f"No 'ai' message found in roles: {roles}"
-    # Verify the human message content
-    assert messages[0]["content"] == "What is a derivative?"
-    # Verify at least one ai message has non-empty content
-    ai_messages = [m for m in messages if m["role"] == "ai" and m["content"]]
-    assert len(ai_messages) >= 1, f"No ai message with content found: {messages}"
-
-
-@pytest.mark.asyncio
-async def test_chat_casual_messages_persisted(
-    client: httpx.AsyncClient,
-) -> None:
-    """A casual (no-tool) conversation should also persist messages."""
-    r = await client.post("/chat", json={"question": "Hola"})
-    assert r.status_code == 200
-    lines = _parse_sse(r.text)
-    session_id = json.loads(lines[0].removeprefix("data: "))["session_id"]
-
-    r2 = await client.get(f"/chat/sessions/{session_id}/messages")
-    assert r2.status_code == 200
-    messages = r2.json()
-    assert len(messages) >= 2, f"Expected at least 2 messages, got {len(messages)}: {messages}"
+    response = await client.get(f"/sessions/{sid}/messages")
+    assert response.status_code == 200
+    messages = response.json()
+    assert len(messages) >= 2
     assert messages[0]["role"] == "human"
-    assert messages[0]["content"] == "Hola"
-    ai_messages = [m for m in messages if m["role"] == "ai"]
+    assert messages[0]["content"] == "What is a derivative?"
+    ai_messages = [m for m in messages if m["role"] == "ai" and m["content"]]
     assert len(ai_messages) >= 1
-    assert len(ai_messages[0]["content"]) > 0
 
 
-@pytest.mark.asyncio
-async def test_chat_list_sessions(
-    seeded_chat_client: httpx.AsyncClient,
+async def test_chat_tool_messages_persisted(
+    chat_session: tuple[httpx.AsyncClient, str],
 ) -> None:
-    """GET /chat/sessions should return created sessions."""
-    await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
+    client, sid = chat_session
+    await client.post(
+        "/chat", json={"question": "What is a derivative?", "session_id": sid}
     )
-    r = await seeded_chat_client.get("/chat/sessions")
-    assert r.status_code == 200
-    sessions = r.json()
-    assert len(sessions) >= 1
-    assert "id" in sessions[0]
-    assert "title" in sessions[0]
+
+    messages = (await client.get(f"/sessions/{sid}/messages")).json()
+    roles = [m["role"] for m in messages]
+    assert "tool" in roles, f"ToolMessages not persisted. Roles: {roles}"
+    ai_with_tools = [m for m in messages if m["role"] == "ai" and m.get("tool_calls")]
+    assert len(ai_with_tools) >= 1
 
 
-@pytest.mark.asyncio
-async def test_chat_delete_session(
-    seeded_chat_client: httpx.AsyncClient,
+async def test_chat_multiturn_with_tools(
+    chat_session: tuple[httpx.AsyncClient, str],
 ) -> None:
-    """DELETE /chat/sessions/{id} should remove session and messages."""
-    r = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
+    client, sid = chat_session
+    r1 = await client.post(
+        "/chat", json={"question": "What is a derivative?", "session_id": sid}
     )
-    lines = _parse_sse(r.text)
-    session_id = json.loads(lines[0].removeprefix("data: "))["session_id"]
+    assert r1.status_code == 200
 
-    # Delete
-    r2 = await seeded_chat_client.delete(f"/chat/sessions/{session_id}")
-    assert r2.status_code == 204
-
-    # Verify it's gone
-    r3 = await seeded_chat_client.get(f"/chat/sessions/{session_id}/messages")
-    assert r3.status_code == 404
+    r2 = await client.post("/chat", json={"question": "Thanks!", "session_id": sid})
+    assert r2.status_code == 200
+    lines = _parse_sse(r2.text)
+    assert [ln for ln in lines if '"error"' in ln] == []
+    assert lines[-1] == "data: [DONE]"
 
 
-@pytest.mark.asyncio
-async def test_chat_invalid_session_id(client: httpx.AsyncClient) -> None:
-    """Using a non-existent session_id should return 404."""
-    fake_id = str(uuid.uuid4())
+async def test_chat_sets_session_title(
+    chat_session: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, sid = chat_session
+    await client.post(
+        "/chat", json={"question": "What is a derivative?", "session_id": sid}
+    )
+    detail = (await client.get(f"/sessions/{sid}")).json()
+    assert detail["title"] == "What is a derivative?"
+
+
+# ---------------------------------------------------------------------------
+# Validation & session binding
+# ---------------------------------------------------------------------------
+
+
+async def test_chat_requires_session_id(client: httpx.AsyncClient) -> None:
+    response = await client.post("/chat", json={"question": "Hello"})
+    assert response.status_code == 422
+
+
+async def test_chat_unknown_session_returns_404(client: httpx.AsyncClient) -> None:
     response = await client.post(
-        "/chat",
-        json={"question": "Hello", "session_id": fake_id},
+        "/chat", json={"question": "Hello", "session_id": str(uuid.uuid4())}
     )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "SESSION_NOT_FOUND"
+
+
+async def test_chat_missing_question(client: httpx.AsyncClient) -> None:
+    sid = await _create_session(client)
+    response = await client.post("/chat", json={"session_id": sid})
+    assert response.status_code == 422
+
+
+async def test_chat_empty_question(client: httpx.AsyncClient) -> None:
+    sid = await _create_session(client)
+    response = await client.post("/chat", json={"question": "", "session_id": sid})
+    assert response.status_code == 422
+
+
+async def test_messages_endpoint_unknown_session(client: httpx.AsyncClient) -> None:
+    response = await client.get(f"/sessions/{uuid.uuid4()}/messages")
     assert response.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_chat_tool_messages_persisted(
-    seeded_chat_client: httpx.AsyncClient,
-) -> None:
-    """After an academic question (tool calling), tool messages must be saved."""
-    r = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
-    )
-    assert r.status_code == 200
-    lines = _parse_sse(r.text)
-    session_id = json.loads(lines[0].removeprefix("data: "))["session_id"]
-
-    r2 = await seeded_chat_client.get(f"/chat/sessions/{session_id}/messages")
-    messages = r2.json()
-    roles = [m["role"] for m in messages]
-    # Must have: human → ai (tool_calls) → tool → ai (answer)
-    assert "tool" in roles, f"ToolMessages not persisted. Roles: {roles}"
-    # The ai message with tool_calls should have non-empty tool_calls
-    ai_with_tools = [m for m in messages if m["role"] == "ai" and m.get("tool_calls")]
-    assert len(ai_with_tools) >= 1, f"No AI message with tool_calls found: {messages}"
-
-
-@pytest.mark.asyncio
-async def test_chat_multiturn_with_tools(
-    seeded_chat_client: httpx.AsyncClient,
-) -> None:
-    """A follow-up after a tool-calling turn must work (history is valid)."""
-    # First turn: academic question triggers tools
-    r1 = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "What is a derivative?"},
-    )
-    assert r1.status_code == 200
-    lines1 = _parse_sse(r1.text)
-    session_id = json.loads(lines1[0].removeprefix("data: "))["session_id"]
-
-    # Second turn: casual follow-up on same session
-    r2 = await seeded_chat_client.post(
-        "/chat",
-        json={"question": "Thanks!", "session_id": session_id},
-    )
-    assert r2.status_code == 200
-    lines2 = _parse_sse(r2.text)
-    # Should NOT contain an error
-    error_lines = [l for l in lines2 if '"error"' in l]
-    assert len(error_lines) == 0, f"Got errors: {error_lines}"
-    # Should end with [DONE]
-    assert lines2[-1] == "data: [DONE]"
-
-
 # ---------------------------------------------------------------------------
-# Validation
+# Expired session
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_chat_missing_question(client: httpx.AsyncClient) -> None:
-    response = await client.post("/chat", json={})
-    assert response.status_code == 422
+async def _backdate_session(session_id: str, *, days: int = 0, hours: int = 0) -> None:
+    """Set last_activity_at into the past, directly in the DB."""
+    factory = get_session_factory()
+    async with factory() as db:
+        await db.execute(
+            update(Session)
+            .where(Session.id == uuid.UUID(session_id))
+            .values(
+                last_activity_at=datetime.now(UTC) - timedelta(days=days, hours=hours)
+            )
+        )
+        await db.commit()
 
 
-@pytest.mark.asyncio
-async def test_chat_empty_question(client: httpx.AsyncClient) -> None:
-    response = await client.post("/chat", json={"question": ""})
-    assert response.status_code == 422
+async def test_chat_expired_session_returns_410(client: httpx.AsyncClient) -> None:
+    sid = await _create_session(client)
+    await _backdate_session(sid, days=2)
+    response = await client.post("/chat", json={"question": "Hello", "session_id": sid})
+    assert response.status_code == 410
+    assert response.json()["error"]["code"] == "SESSION_EXPIRED"
+
+
+# ---------------------------------------------------------------------------
+# Mid-stream failure protocol
+# ---------------------------------------------------------------------------
+
+
+async def test_midstream_failure_emits_structured_error_and_done(
+    chat_session: tuple[httpx.AsyncClient, str],
+) -> None:
+    """An exception inside the agent stream must end with a structured error
+    event (no leaked exception text) followed by [DONE], and the user message
+    must still be persisted."""
+    client, sid = chat_session
+    response = await client.post(
+        "/chat",
+        json={
+            "question": "What is a derivative? TRIGGER_STREAM_FAILURE",
+            "session_id": sid,
+        },
+    )
+    assert response.status_code == 200
+    lines = _parse_sse(response.text)
+
+    error_lines = [ln for ln in lines if '"error"' in ln]
+    assert len(error_lines) == 1
+    payload = json.loads(error_lines[0].removeprefix("data: "))
+    assert payload["error"]["code"] == "STREAM_FAILED"
+    assert "boom" not in payload["error"]["message"]  # raw exception not leaked
+    assert lines[-1] == "data: [DONE]"
+
+    messages = (await client.get(f"/sessions/{sid}/messages")).json()
+    assert any(
+        m["role"] == "human" and "TRIGGER_STREAM_FAILURE" in m["content"]
+        for m in messages
+    )

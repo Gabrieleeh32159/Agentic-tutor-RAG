@@ -11,3 +11,9 @@ __pycache__
 .claude
 tests
 *.md
+web
+docs
+.playwright-mcp
+scripts/streamlit_app.py
+scripts/chat.py
+scripts/make_fixtures.py

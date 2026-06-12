@@ -25,8 +25,29 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     CHAT_MODEL: str = "gpt-4o-mini"
 
+    SESSION_TTL_HOURS: int = 24
+    CLEANUP_INTERVAL_MINUTES: int = 15
+    STALE_PROCESSING_MINUTES: int = 60
+
+    MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024  # 10 MB
+
+    VISION_MODEL: str = "gpt-4o-mini"
+
+    MAX_PDF_PAGES: int = 50
+    MAX_OCR_PAGES_PER_DOC: int = 20
+    MAX_DOCS_PER_SESSION: int = 20
+    MAX_CHUNKS_PER_DOC: int = 500
+
+    CHAT_STREAM_TIMEOUT_SECONDS: int = 120
+
+    FRONTEND_ORIGIN: str = "http://localhost:3000"
+
     APP_ENV: str = "local"
     LOG_LEVEL: str = "INFO"
+
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
 
 
 @lru_cache

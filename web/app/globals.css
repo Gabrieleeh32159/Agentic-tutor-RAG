@@ -1,0 +1,252 @@
+@import "tailwindcss";
+
+/* ─── Paper & Ink palette ───────────────────────────────────────────────── */
+:root {
+  /* Core palette */
+  --paper: #f6f1e7;      /* warm off-white field */
+  --ink: #1c1814;        /* near-black ink */
+  --rule: #e2d9c8;       /* hairline rule / divider */
+  --accent: #d8431f;     /* vermilion — stamps, active states, links */
+  --card: #fffdf7;       /* elevated card surface */
+
+  /* Shadows */
+  --shadow-offset: 2px 2px 0 rgba(28, 24, 20, 0.12);
+  --shadow-offset-md: 3px 3px 0 rgba(28, 24, 20, 0.14);
+  --shadow-offset-lg: 4px 4px 0 rgba(28, 24, 20, 0.16);
+
+  /* Paper grain — tiny SVG noise as a data-URI */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+/* ─── Tailwind v4 theme tokens ──────────────────────────────────────────── */
+@theme inline {
+  /* Map CSS vars → Tailwind color utilities */
+  --color-paper:  var(--paper);
+  --color-ink:    var(--ink);
+  --color-rule:   var(--rule);
+  --color-accent: var(--accent);
+  --color-card:   var(--card);
+
+  /* Font families wired from next/font CSS variables */
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-body:    var(--font-ibm-plex-sans), system-ui, sans-serif;
+  --font-mono:    var(--font-ibm-plex-mono), "Courier New", monospace;
+}
+
+/* ─── Base styles ───────────────────────────────────────────────────────── */
+html {
+  background-color: var(--paper);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+body {
+  font-family: var(--font-ibm-plex-sans), system-ui, sans-serif;
+  background-color: var(--paper);
+  color: var(--ink);
+  /* Subtle paper grain overlay */
+  background-image: var(--grain);
+}
+
+/* ─── Typography helpers ────────────────────────────────────────────────── */
+.font-display { font-family: var(--font-fraunces), Georgia, serif; }
+.font-body    { font-family: var(--font-ibm-plex-sans), system-ui, sans-serif; }
+.font-mono    { font-family: var(--font-ibm-plex-mono), "Courier New", monospace; }
+
+/* ─── Card with hard offset shadow ─────────────────────────────────────── */
+.card-paper {
+  background-color: var(--card);
+  border: 1px solid var(--ink);
+  box-shadow: var(--shadow-offset);
+}
+
+.card-paper-md {
+  background-color: var(--card);
+  border: 1px solid var(--ink);
+  box-shadow: var(--shadow-offset-md);
+}
+
+/* ─── Stamped status chip ────────────────────────────────────────────────
+   Usage: <span class="chip">READY</span>
+   Variant classes: chip--accent (vermilion), chip--muted
+───────────────────────────────────────────────────────────────────────── */
+.chip {
+  display: inline-block;
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 0.625rem;   /* 10px */
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border: 1px solid var(--ink);
+  background-color: transparent;
+  color: var(--ink);
+  /* slight random rotation handled via inline style on the element */
+}
+
+.chip--accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip--muted {
+  border-color: var(--rule);
+  color: color-mix(in srgb, var(--ink) 50%, transparent);
+}
+
+/* ─── Ruled paper section background ────────────────────────────────────── */
+.ruled-bg {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 1.5rem,
+    var(--rule) 1.5rem,
+    var(--rule) calc(1.5rem + 1px)
+  );
+}
+
+/* ─── Dotted underline links (editorial style) ───────────────────────────── */
+a.dotted-link,
+.dotted-link a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+a.dotted-link:hover,
+.dotted-link a:hover {
+  text-decoration-style: solid;
+}
+
+/* ─── Vermilion margin line (active answer indicator) ───────────────────── */
+.margin-line {
+  border-left: 3px solid var(--accent);
+  padding-left: 0.75rem;
+}
+
+/* ─── Offset shadow utilities (complement Tailwind's shadow-*) ────────────── */
+.shadow-ink    { box-shadow: var(--shadow-offset); }
+.shadow-ink-md { box-shadow: var(--shadow-offset-md); }
+.shadow-ink-lg { box-shadow: var(--shadow-offset-lg); }
+
+/* ─── Focus states (accessibility) ──────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── Streaming caret (rides the last block of the streaming answer) ────── */
+.stream-caret > :last-child::after,
+.stream-caret:empty::after {
+  content: "▍";
+  color: var(--accent);
+  margin-left: 1px;
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes caret-blink {
+  to { visibility: hidden; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-caret > :last-child::after,
+  .stream-caret:empty::after { animation: none; }
+}
+
+/* ─── Markdown body (rendered answers) ──────────────────────────────────── */
+.md-body {
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.md-body > *:first-child { margin-top: 0; }
+.md-body > *:last-child  { margin-bottom: 0; }
+
+.md-body p  { margin: 0.65em 0; }
+.md-body ul { list-style: disc; padding-left: 1.25rem; margin: 0.65em 0; }
+.md-body ol { list-style: decimal; padding-left: 1.25rem; margin: 0.65em 0; }
+.md-body li { margin: 0.25em 0; }
+
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 1em 0 0.4em;
+}
+.md-body h1 { font-size: 1.25rem; }
+.md-body h2 { font-size: 1.125rem; }
+.md-body h3 { font-size: 1rem; }
+.md-body h4 { font-size: 0.9rem; }
+
+.md-body code {
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 0.82em;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border: 1px solid var(--rule);
+  padding: 0.1em 0.35em;
+}
+
+.md-body pre {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border: 1px solid var(--rule);
+  padding: 0.75rem;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.md-body pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.md-body blockquote {
+  border-left: 3px solid var(--rule);
+  padding-left: 0.75rem;
+  margin: 0.65em 0;
+  color: color-mix(in srgb, var(--ink) 70%, transparent);
+}
+
+.md-body table {
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.85em;
+}
+
+.md-body th {
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.md-body th, .md-body td {
+  border: 1px solid var(--rule);
+  padding: 0.35rem 0.6rem;
+}
+
+.md-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.md-body hr {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 1em 0;
+}
+
+.md-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25em 0;
+}

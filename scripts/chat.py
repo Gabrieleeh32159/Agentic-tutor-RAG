@@ -1,6 +1,10 @@
 """Interactive chat script that pretty-prints sources and streams the LLM answer.
 
 Supports multi-turn conversations via session_id persistence.
+
+Usage:
+    uv run python scripts/chat.py 'your question'
+    uv run python scripts/chat.py 'your question' <existing-session-id>
 """
 
 from __future__ import annotations
@@ -13,27 +17,23 @@ import httpx
 BASE_URL = "http://localhost:8000"
 
 
-def chat_turn(question: str, session_id: str | None = None, subject: str | None = None, level: str | None = None) -> str | None:
-    """Send one message and stream the response. Returns the session_id."""
-    payload: dict[str, str] = {"question": question}
-    if session_id:
-        payload["session_id"] = session_id
-    if subject:
-        payload["subject"] = subject
-    if level:
-        payload["level"] = level
+def _create_session() -> str:
+    """POST /sessions and return the new session id."""
+    resp = httpx.post(f"{BASE_URL}/sessions", timeout=10.0)
+    resp.raise_for_status()
+    sid = resp.json()["id"]
+    print(f"  📝 New session: {sid}")
+    return sid
+
+
+def chat_turn(question: str, session_id: str) -> None:
+    """Send one message and stream the response."""
+    payload: dict[str, str] = {"question": question, "session_id": session_id}
 
     print(f"\n{'─' * 60}")
     print(f"  Question: {question}")
-    if session_id:
-        print(f"  Session:  {session_id}")
-    if subject:
-        print(f"  Subject:  {subject}")
-    if level:
-        print(f"  Level:    {level}")
+    print(f"  Session:  {session_id}")
     print(f"{'─' * 60}\n")
-
-    result_session_id = session_id
 
     with httpx.stream(
         "POST",
@@ -60,23 +60,21 @@ def chat_turn(question: str, session_id: str | None = None, subject: str | None 
 
             parsed = json.loads(data)
 
-            if "session_id" in parsed:
-                result_session_id = parsed["session_id"]
-                print(f"  📝 Session: {result_session_id}")
-
-            elif "sources" in parsed:
+            if "sources" in parsed:
                 sources = parsed["sources"]
                 print("  📚 Source Documents:")
                 print(f"  {'─' * 50}")
                 for i, src in enumerate(sources, 1):
                     score_pct = src["score"] * 100
-                    print(f"  {i}. {src['title']}")
+                    print(f"  {i}. {src['filename']}")
                     print(f"     ID:    {src['document_id']}")
                     print(f"     Score: {score_pct:.1f}%")
                     chunks = src.get("chunks", [])
                     for j, chunk in enumerate(chunks, 1):
                         preview = chunk["chunk_text"][:120].replace("\n", " ")
-                        print(f"     Chunk {j} (score {chunk['score']:.4f}): {preview}...")
+                        print(
+                            f"     Chunk {j} (score {chunk['score']:.4f}): {preview}..."
+                        )
                 print(f"  {'─' * 50}\n")
 
             elif "step" in parsed:
@@ -88,11 +86,13 @@ def chat_turn(question: str, session_id: str | None = None, subject: str | None 
                     is_relevant = parsed.get("is_relevant", False)
                     grade_query = parsed.get("query", "")
                     icon = "✅" if is_relevant else "❌"
-                    print(f"  {icon} [{step}] Results for \"{grade_query}\" are {'relevant' if is_relevant else 'not relevant'}")
+                    print(
+                        f'  {icon} [{step}] Results for "{grade_query}" are {"relevant" if is_relevant else "not relevant"}'
+                    )
                 elif step == "rewrite_query":
                     retry = parsed.get("retry", 0)
                     new_q = parsed.get("new_question", "")
-                    print(f"  🔄 [{step}] Attempt {retry}: \"{new_q}\"")
+                    print(f'  🔄 [{step}] Attempt {retry}: "{new_q}"')
 
             elif "token" in parsed:
                 if not answer_started:
@@ -106,20 +106,20 @@ def chat_turn(question: str, session_id: str | None = None, subject: str | None 
                 sys.exit(1)
 
     print(f"{'─' * 60}")
-    return result_session_id
 
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("Usage: uv run python scripts/chat.py 'your question' [subject] [level]")
-        print("       After the first message, enter follow-up questions interactively.")
+        print("Usage: uv run python scripts/chat.py 'your question' [session-id]")
+        print(
+            "       After the first message, enter follow-up questions interactively."
+        )
         sys.exit(1)
 
     question = sys.argv[1]
-    subject = sys.argv[2] if len(sys.argv) > 2 else None
-    level = sys.argv[3] if len(sys.argv) > 3 else None
+    session_id = sys.argv[2] if len(sys.argv) > 2 else _create_session()
 
-    session_id = chat_turn(question, subject=subject, level=level)
+    chat_turn(question, session_id)
 
     # Interactive follow-up loop
     while True:
@@ -130,7 +130,7 @@ def main() -> None:
             break
         if not follow_up or follow_up.lower() == "q":
             break
-        session_id = chat_turn(follow_up, session_id=session_id)
+        chat_turn(follow_up, session_id)
 
 
 if __name__ == "__main__":

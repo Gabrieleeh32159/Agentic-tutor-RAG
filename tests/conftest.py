@@ -17,21 +17,33 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from sqlmodel import SQLModel
 
 import app.shared.embeddings as embeddings_module
-from app.shared.embeddings import EmbeddingProvider
+from app.chat.models import ChatMessage  # noqa: F401
+from app.documents.models import Document, DocumentChunk  # noqa: F401
+from app.sessions.models import Session  # noqa: F401
 from app.shared.config import get_settings
 from app.shared.database import close_engine, get_engine, init_engine
-
-from app.documents.models import Document, DocumentChunk  # noqa: F401
-from app.chat.models import ChatSession, ChatMessage  # noqa: F401
-
+from app.shared.embeddings import EmbeddingProvider
 
 EMBEDDING_DIM = 1536
 
 # Keywords that indicate an academic question requiring tool use
 _ACADEMIC_KEYWORDS = [
-    "derivative", "cell", "biology", "math", "physics", "chemistry",
-    "history", "science", "equation", "theorem", "explain", "what is",
-    "how does", "describe", "calculate", "define",
+    "derivative",
+    "cell",
+    "biology",
+    "math",
+    "physics",
+    "chemistry",
+    "history",
+    "science",
+    "equation",
+    "theorem",
+    "explain",
+    "what is",
+    "how does",
+    "describe",
+    "calculate",
+    "define",
 ]
 
 
@@ -82,6 +94,15 @@ class FakeChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
+        # --- Grounding judge prompt ---
+        if any(
+            isinstance(m.content, str) and "grounding judge" in m.content.lower()
+            for m in messages
+        ):
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content="yes"))]
+            )
+
         # --- Grader prompt ---
         if any(
             isinstance(m.content, str) and "relevance grader" in m.content.lower()
@@ -108,9 +129,7 @@ class FakeChatModel(BaseChatModel):
         if any(isinstance(m, ToolMessage) for m in messages):
             return ChatResult(
                 generations=[
-                    ChatGeneration(
-                        message=AIMessage(content="This is a test answer.")
-                    )
+                    ChatGeneration(message=AIMessage(content="This is a test answer."))
                 ]
             )
 
@@ -119,7 +138,11 @@ class FakeChatModel(BaseChatModel):
             # Find the last human message
             last_human = ""
             for m in reversed(messages):
-                if hasattr(m, "content") and isinstance(m.content, str) and m.type == "human":
+                if (
+                    hasattr(m, "content")
+                    and isinstance(m.content, str)
+                    and m.type == "human"
+                ):
                     last_human = m.content
                     break
 
@@ -136,9 +159,7 @@ class FakeChatModel(BaseChatModel):
                         }
                     ],
                 )
-                return ChatResult(
-                    generations=[ChatGeneration(message=msg)]
-                )
+                return ChatResult(generations=[ChatGeneration(message=msg)])
 
         # --- Default: casual / direct response ---
         return ChatResult(
@@ -156,6 +177,14 @@ class FakeChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
+        last_human = ""
+        for m in reversed(messages):
+            if getattr(m, "type", "") == "human" and isinstance(m.content, str):
+                last_human = m.content
+                break
+        if "TRIGGER_STREAM_FAILURE" in last_human:
+            raise RuntimeError("boom - simulated mid-stream provider failure")
+
         result = self._generate(messages, stop, run_manager, **kwargs)
         msg = result.generations[0].message
 
@@ -212,7 +241,46 @@ def mock_chat_model():
 
 
 @pytest.fixture(autouse=True)
-async def _init_db() -> AsyncIterator[None]: 
+def mock_judge_model(monkeypatch: pytest.MonkeyPatch):
+    """The grounding judge uses the fake chat model in tests."""
+    import app.chat.router as chat_router
+
+    monkeypatch.setattr(chat_router, "get_chat_model", lambda: FakeChatModel())
+
+
+@pytest.fixture(autouse=True)
+def mock_moderation(monkeypatch: pytest.MonkeyPatch):
+    """Moderation passes everything by default; tests override per-case."""
+    import app.guardrails.moderation as moderation_module
+    from app.guardrails.moderation import ModerationResult
+
+    async def _benign(text: str) -> ModerationResult:
+        return ModerationResult(flagged=False)
+
+    monkeypatch.setattr(moderation_module, "moderate_text", _benign)
+
+
+@pytest.fixture(autouse=True)
+def _disable_rate_limiting():
+    from app.shared.rate_limit import limiter
+
+    limiter.enabled = False
+    yield
+    limiter.enabled = False
+
+
+@pytest.fixture(autouse=True)
+def _reset_ingestion_semaphore() -> None:
+    """Reset the lazy-init semaphore before each test so every test gets a
+    fresh semaphore bound to its own event loop (fixes event-loop footgun)."""
+    import app.ingestion.service as ingestion_service
+
+    ingestion_service._ingestion_semaphore = None
+    yield  # type: ignore[misc]
+
+
+@pytest.fixture(autouse=True)
+async def _init_db() -> AsyncIterator[None]:
     """Initialize the DB engine and create tables for each test (avoids event-loop mismatch)."""
     settings = get_settings()
     init_engine(settings.DATABASE_URL)
@@ -238,3 +306,31 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+FAKE_VISION_TEXT = "Scanned page about photosynthesis and chlorophyll absorption."
+
+
+@pytest.fixture(autouse=True)
+def mock_vision(monkeypatch: pytest.MonkeyPatch):
+    """Replace vision OCR with a canned transcription (no network).
+
+    Yields the canned text so tests can assert against it without importing
+    from conftest (tests/ is not a package).
+    """
+    import app.ingestion.vision as vision_module
+
+    async def _fake_extract(
+        image_bytes: bytes,
+        mime: str = "image/png",
+        *,
+        trace_metadata: dict | None = None,
+    ) -> str:
+        return FAKE_VISION_TEXT
+
+    def _fake_rasterize(pdf_bytes: bytes, page_index: int, scale: float = 2.0) -> bytes:
+        return b"fake-png"
+
+    monkeypatch.setattr(vision_module, "extract_text_from_image", _fake_extract)
+    monkeypatch.setattr(vision_module, "rasterize_pdf_page", _fake_rasterize)
+    yield FAKE_VISION_TEXT

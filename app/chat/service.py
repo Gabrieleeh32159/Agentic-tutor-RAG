@@ -12,32 +12,21 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from app.chat.models import AgentState, NodeName
 from app.chat.prompts import SYSTEM_PROMPT
 from app.chat.repository import (
-    create_session,
-    delete_session,
-    get_session_by_id,
     get_session_messages,
-    list_sessions,
     load_session_messages,
     save_messages,
-    update_session_title,
 )
 from app.chat.tools import make_search_tool
 from app.shared.llm import get_chat_model
 
 logger = logging.getLogger(__name__)
 
-# Re-export for backwards compatibility
 __all__ = [
     "SYSTEM_PROMPT",
     "build_graph",
-    "create_session",
-    "delete_session",
-    "get_session_by_id",
     "get_session_messages",
-    "list_sessions",
     "load_session_messages",
     "save_messages",
-    "update_session_title",
 ]
 
 # ---------------------------------------------------------------------------
