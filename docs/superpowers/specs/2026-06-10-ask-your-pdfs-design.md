@@ -104,6 +104,13 @@ Text uploads (txt/md) work end-to-end on the new schema.
 ## Test strategy
 Real parsers on tiny committed fixture files (deterministic, no network); fake only the AI: extend `FakeChatModel` (grounding-judge branch), fake vision extraction, fake moderation fixture. TTL tests call `delete_expired_sessions()` directly on stale-seeded rows. Async-ingestion tests await the exposed task handle (no sleeps). The existing autouse-fixture pattern in `tests/conftest.py` is the template.
 
+## Carry-over items for later phases (from implementation reviews)
+
+- **Phase 7 (deploy):** set `FORWARDED_ALLOW_IPS="*"` (env var read by uvicorn) on Render so `X-Forwarded-For` is honored — otherwise slowapi keys every client on the load-balancer IP and the whole internet shares one rate-limit bucket.
+- **Phase 6 (frontend):** error-code casing is a dual namespace by design — UPPERCASE envelope codes (`SESSION_NOT_FOUND`, `RATE_LIMITED`, `STREAM_FAILED`) vs lowercase document-row codes (`parse_failed`, `interrupted`).
+- **Phase 4/6 (UX nicety):** chat against a session whose document is still processing burns the full retry loop and answers "not found"; consider surfacing "a document is still processing" in the tool or UI.
+- **Any future SSE endpoint** must carry a `@limiter.limit` decorator — slowapi's ASGI middleware corrupts undecorated streaming responses (re-sends `http.response.start` per chunk); `/chat` is exempt via its decorator.
+
 ## Risks
 - **Render 512 MB RAM** — top risk; mitigated by pypdf (not pdfplumber), page-at-a-time pypdfium2 rasterization, openpyxl read_only, hard caps. Verify with a 50-page scanned PDF before launch.
 - **Render sleep kills in-flight work** — startup reconciliation (`failed/interrupted`), frontend wake-up state, structured mid-stream SSE error.
