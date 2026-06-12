@@ -302,7 +302,12 @@ async def test_vision_refusal_does_not_pollute_index(
     """A scanned doc whose every page yields a refusal must fail, not index garbage."""
     import app.ingestion.vision as vision_module
 
-    async def _refuse(image_bytes: bytes, mime: str = "image/png") -> str:
+    async def _refuse(
+        image_bytes: bytes,
+        mime: str = "image/png",
+        *,
+        trace_metadata: dict | None = None,
+    ) -> str:
         return "I'm sorry, but I can't assist with that."
 
     monkeypatch.setattr(vision_module, "extract_text_from_image", _refuse)

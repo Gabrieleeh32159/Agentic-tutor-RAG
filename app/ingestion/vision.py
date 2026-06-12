@@ -7,6 +7,7 @@ from io import BytesIO
 from langchain_core.messages import HumanMessage
 
 from app.shared.llm import get_vision_model
+from app.shared.observability import get_langfuse_handler
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,19 @@ def clean_transcription(text: str) -> str:
     return stripped
 
 
-async def extract_text_from_image(image_bytes: bytes, mime: str = "image/png") -> str:
-    """OCR a single page/image via the vision LLM. Returns extracted text."""
+async def extract_text_from_image(
+    image_bytes: bytes,
+    mime: str = "image/png",
+    *,
+    trace_metadata: dict | None = None,
+) -> str:
+    """OCR a single page/image via the vision LLM. Returns extracted text.
+
+    The optional ``trace_metadata`` dict is forwarded to the Langfuse callback
+    handler (when configured) so each OCR call appears as a traced span with
+    document/page context. When no Langfuse keys are set the parameter is a
+    strict no-op.
+    """
     encoded = base64.b64encode(image_bytes).decode()
     message = HumanMessage(
         content=[
@@ -52,7 +64,14 @@ async def extract_text_from_image(image_bytes: bytes, mime: str = "image/png") -
             },
         ]
     )
-    response = await get_vision_model().ainvoke([message])
+    handler = get_langfuse_handler()
+    config: dict = {}
+    if handler is not None:
+        config = {
+            "callbacks": [handler],
+            "metadata": {"langfuse_tags": ["ocr"], **(trace_metadata or {})},
+        }
+    response = await get_vision_model().ainvoke([message], config=config or None)
     return (
         response.content if isinstance(response.content, str) else str(response.content)
     )

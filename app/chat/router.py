@@ -24,6 +24,8 @@ from app.sessions.service import get_active_session, touch_session, update_sessi
 from app.shared.config import get_settings
 from app.shared.database import get_session, get_session_factory
 from app.shared.llm import get_chat_model
+from app.shared.logging import get_request_id
+from app.shared.observability import get_langfuse_handler, score_trace
 from app.shared.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -43,8 +45,7 @@ async def chat(
     session_id = chat_session.id
 
     # --- Input guardrails (injection scan + moderation) ---
-    # InputCheckResult returned here is consumed by observability in Phase 5.
-    await check_input(body.question)
+    guardrail_result = await check_input(body.question)
 
     # --- Load history + build state ---
     history = await load_session_messages(session, session_id)
@@ -69,16 +70,34 @@ async def chat(
         ) as http_client:
             graph = build_graph(http_client)
 
+            # --- Observability config (no-op when keys are absent) ---
+            handler = get_langfuse_handler()
+            run_config: dict = {}
+            if handler is not None:
+                tags = ["chat"]
+                if guardrail_result.moderation_degraded:
+                    tags.append("guardrail_degraded")
+                run_config = {
+                    "callbacks": [handler],
+                    "metadata": {
+                        "langfuse_session_id": str(session_id),
+                        "langfuse_tags": tags,
+                        "request_id": get_request_id(),
+                    },
+                }
+
             # Emit session_id first
             yield f"data: {json.dumps({'session_id': str(session_id)})}\n\n"
 
             new_messages: list = []
             retrieved_chunks: list[str] = []
+            retrieved_doc_ids: list[str] = []
+            search_attempts: int = 0
 
             try:
                 async with asyncio.timeout(get_settings().CHAT_STREAM_TIMEOUT_SECONDS):
                     async for event in graph.astream_events(
-                        initial_state, version="v2"
+                        initial_state, version="v2", config=run_config or None
                     ):
                         kind = event["event"]
 
@@ -100,6 +119,12 @@ async def chat(
                                     for source in sources
                                     for chunk in source.get("chunks", [])
                                 ]
+                                retrieved_doc_ids[:] = [
+                                    s["document_id"]
+                                    for s in sources
+                                    if "document_id" in s
+                                ]
+                                search_attempts += 1
 
                             elif name == "grade_result":
                                 data = event["data"]
@@ -185,6 +210,19 @@ async def chat(
                 logger.exception("Grounding check failed; verdict unverified")
                 verdict = "unverified"
             yield f"data: {json.dumps({'grounding': {'verdict': verdict}})}\n\n"
+
+            # --- Observability scores (no-op when handler is None) ---
+            score_trace(
+                handler,
+                name="grounding",
+                value={"grounded": 1.0, "ungrounded": 0.0, "unverified": 0.5}[verdict],
+            )
+            if search_attempts:
+                score_trace(
+                    handler,
+                    name="retrieval_attempts",
+                    value=float(search_attempts),
+                )
 
             # --- Persist new messages BEFORE yielding [DONE] ---
             # (After the last yield, the client may disconnect and cancel the generator)

@@ -130,7 +130,12 @@ async def process_document(document_id: uuid.UUID, data: bytes, extension: str) 
                             image_mime = "image/png"
                         text = vision.clean_transcription(
                             await vision.extract_text_from_image(
-                                image_bytes, mime=image_mime
+                                image_bytes,
+                                mime=image_mime,
+                                trace_metadata={
+                                    "document_id": str(document.id),
+                                    "page_number": page_number,
+                                },
                             )
                         )
                         if text:
