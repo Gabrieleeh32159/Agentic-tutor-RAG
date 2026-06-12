@@ -18,6 +18,7 @@ from app.chat.service import (
     load_session_messages,
     save_messages,
 )
+from app.guardrails.input_check import check_input
 from app.sessions.service import get_active_session, touch_session, update_session_title
 from app.shared.config import get_settings
 from app.shared.database import get_session, get_session_factory
@@ -38,6 +39,9 @@ async def chat(
     # --- Session management ---
     chat_session = await get_active_session(session, body.session_id)
     session_id = chat_session.id
+
+    # --- Input guardrails (injection scan + moderation) ---
+    await check_input(body.question)
 
     # --- Load history + build state ---
     history = await load_session_messages(session, session_id)

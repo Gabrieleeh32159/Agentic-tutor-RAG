@@ -232,6 +232,18 @@ def mock_chat_model():
 
 
 @pytest.fixture(autouse=True)
+def mock_moderation(monkeypatch: pytest.MonkeyPatch):
+    """Moderation passes everything by default; tests override per-case."""
+    import app.guardrails.moderation as moderation_module
+    from app.guardrails.moderation import ModerationResult
+
+    async def _benign(text: str) -> ModerationResult:
+        return ModerationResult(flagged=False)
+
+    monkeypatch.setattr(moderation_module, "moderate_text", _benign)
+
+
+@pytest.fixture(autouse=True)
 def _disable_rate_limiting():
     from app.shared.rate_limit import limiter
 

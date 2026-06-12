@@ -113,7 +113,11 @@ def make_search_tool(
             )
 
             if is_relevant:
-                return _format_results(results)
+                return (
+                    "<retrieved-content>\n"
+                    + _format_results(results)
+                    + "\n</retrieved-content>"
+                )
 
             # --- 3. Rewrite query (if retries remain) ---
             if attempt < MAX_RETRIES:
